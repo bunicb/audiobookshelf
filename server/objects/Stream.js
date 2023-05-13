@@ -1,8 +1,12 @@
-const Ffmpeg = require('../libs/fluentFfmpeg')
+
 const EventEmitter = require('events')
 const Path = require('path')
-const fs = require('../libs/fsExtra')
 const Logger = require('../Logger')
+const SocketAuthority = require('../SocketAuthority')
+
+const fs = require('../libs/fsExtra')
+const Ffmpeg = require('../libs/fluentFfmpeg')
+
 const { secondsToTimestamp } = require('../utils/index')
 const { writeConcatFile } = require('../utils/ffmpegHelpers')
 const { AudioMimeType } = require('../utils/constants')
@@ -10,14 +14,13 @@ const hlsPlaylistGenerator = require('../utils/hlsPlaylistGenerator')
 const AudioTrack = require('./files/AudioTrack')
 
 class Stream extends EventEmitter {
-  constructor(sessionId, streamPath, user, libraryItem, episodeId, startTime, clientEmitter, transcodeOptions = {}) {
+  constructor(sessionId, streamPath, user, libraryItem, episodeId, startTime, transcodeOptions = {}) {
     super()
 
     this.id = sessionId
     this.user = user
     this.libraryItem = libraryItem
     this.episodeId = episodeId
-    this.clientEmitter = clientEmitter
 
     this.transcodeOptions = transcodeOptions
 
@@ -68,6 +71,10 @@ class Stream extends EventEmitter {
     if (!this.tracks.length) return null
     return this.tracks[0].mimeType
   }
+  get tracksCodec() {
+    if (!this.tracks.length) return null
+    return this.tracks[0].codec
+  }
   get mimeTypesToForceAAC() {
     return [
       AudioMimeType.FLAC,
@@ -75,7 +82,13 @@ class Stream extends EventEmitter {
       AudioMimeType.WMA,
       AudioMimeType.AIFF,
       AudioMimeType.WEBM,
-      AudioMimeType.WEBMA
+      AudioMimeType.WEBMA,
+      AudioMimeType.AWB
+    ]
+  }
+  get codecsToForceAAC() {
+    return [
+      'alac'
     ]
   }
   get userToken() {
@@ -127,7 +140,7 @@ class Stream extends EventEmitter {
   }
 
   async checkSegmentNumberRequest(segNum) {
-    var segStartTime = segNum * this.segmentLength
+    const segStartTime = segNum * this.segmentLength
     if (this.startTime > segStartTime) {
       Logger.warn(`[STREAM] Segment #${segNum} Request @${secondsToTimestamp(segStartTime)} is before start time (${secondsToTimestamp(this.startTime)}) - Reset Transcode`)
       await this.reset(segStartTime - (this.segmentLength * 2))
@@ -136,7 +149,7 @@ class Stream extends EventEmitter {
       return false
     }
 
-    var distanceFromFurthestSegment = segNum - this.furthestSegmentCreated
+    const distanceFromFurthestSegment = segNum - this.furthestSegmentCreated
     if (distanceFromFurthestSegment > 10) {
       Logger.info(`Segment #${segNum} requested is ${distanceFromFurthestSegment} segments from latest (${secondsToTimestamp(segStartTime)}) - Reset Transcode`)
       await this.reset(segStartTime - (this.segmentLength * 2))
@@ -261,7 +274,11 @@ class Stream extends EventEmitter {
 
     const logLevel = process.env.NODE_ENV === 'production' ? 'error' : 'warning'
 
-    const audioCodec = (this.mimeTypesToForceAAC.includes(this.tracksMimeType) || this.transcodeForceAAC) ? 'aac' : 'copy'
+    let audioCodec = 'copy'
+    if (this.transcodeForceAAC || this.mimeTypesToForceAAC.includes(this.tracksMimeType) || this.codecsToForceAAC.includes(this.tracksCodec)) {
+      Logger.debug(`[Stream] Forcing AAC for tracks with mime type ${this.tracksMimeType} and codec ${this.tracksCodec}`)
+      audioCodec = 'aac'
+    }
 
     this.ffmpeg.addOption([
       `-loglevel ${logLevel}`,
@@ -408,7 +425,7 @@ class Stream extends EventEmitter {
   }
 
   clientEmit(evtName, data) {
-    if (this.clientEmitter) this.clientEmitter(this.user.id, evtName, data)
+    SocketAuthority.clientEmitter(this.user.id, evtName, data)
   }
 
   getAudioTrack() {

@@ -7,9 +7,12 @@
 
     <!-- Alternative bookshelf title/author/sort -->
     <div v-if="isAlternativeBookshelfView || isAuthorBookshelfView" class="absolute left-0 z-50 w-full" :style="{ bottom: `-${titleDisplayBottomOffset}rem` }">
-      <p class="truncate" :style="{ fontSize: 0.9 * sizeMultiplier + 'rem' }">
-        {{ displayTitle }}
-      </p>
+      <div :style="{ fontSize: 0.9 * sizeMultiplier + 'rem' }">
+        <div class="flex items-center">
+          <span class="truncate">{{ displayTitle }}</span>
+          <widgets-explicit-indicator :explicit="isExplicit" />
+        </div>
+      </div>
       <p class="truncate text-gray-400" :style="{ fontSize: 0.8 * sizeMultiplier + 'rem' }">{{ displayLineTwo || '&nbsp;' }}</p>
       <p v-if="displaySortLine" class="truncate text-gray-400" :style="{ fontSize: 0.8 * sizeMultiplier + 'rem' }">{{ displaySortLine }}</p>
     </div>
@@ -23,7 +26,7 @@
 
     <div class="w-full h-full absolute top-0 left-0 rounded overflow-hidden z-10">
       <div v-show="libraryItem && !imageReady" class="absolute top-0 left-0 w-full h-full flex items-center justify-center" :style="{ padding: sizeMultiplier * 0.5 + 'rem' }">
-        <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }" class="font-book text-gray-300 text-center">{{ title }}</p>
+        <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }" class="text-gray-300 text-center">{{ title }}</p>
       </div>
 
       <!-- Cover Image -->
@@ -32,13 +35,13 @@
       <!-- Placeholder Cover Title & Author -->
       <div v-if="!hasCover" class="absolute top-0 left-0 right-0 bottom-0 w-full h-full flex items-center justify-center" :style="{ padding: placeholderCoverPadding + 'rem' }">
         <div>
-          <p class="text-center font-book" style="color: rgb(247 223 187)" :style="{ fontSize: titleFontSize + 'rem' }">
+          <p class="text-center" style="color: rgb(247 223 187)" :style="{ fontSize: titleFontSize + 'rem' }">
             {{ titleCleaned }}
           </p>
         </div>
       </div>
       <div v-if="!hasCover" class="absolute left-0 right-0 w-full flex items-center justify-center" :style="{ padding: placeholderCoverPadding + 'rem', bottom: authorBottom + 'rem' }">
-        <p class="text-center font-book" style="color: rgb(247 223 187); opacity: 0.75" :style="{ fontSize: authorFontSize + 'rem' }">{{ authorCleaned }}</p>
+        <p class="text-center" style="color: rgb(247 223 187); opacity: 0.75" :style="{ fontSize: authorFontSize + 'rem' }">{{ authorCleaned }}</p>
       </div>
     </div>
 
@@ -70,7 +73,7 @@
       </div>
 
       <!-- More Menu Icon -->
-      <div ref="moreIcon" v-show="!isSelectionMode" class="hidden md:block absolute cursor-pointer hover:text-yellow-300 300 hover:scale-125 transform duration-150" :style="{ bottom: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem' }" @click.stop.prevent="clickShowMore">
+      <div ref="moreIcon" v-show="!isSelectionMode && moreMenuItems.length" class="hidden md:block absolute cursor-pointer hover:text-yellow-300 300 hover:scale-125 transform duration-150" :style="{ bottom: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem' }" @click.stop.prevent="clickShowMore">
         <span class="material-icons" :style="{ fontSize: 1.2 * sizeMultiplier + 'rem' }">more_vert</span>
       </div>
     </div>
@@ -102,8 +105,10 @@
     </div>
 
     <!-- Podcast Episode # -->
-    <div v-if="recentEpisodeNumber && !isHovering && !isSelectionMode && !processing" class="absolute rounded-lg bg-black bg-opacity-90 box-shadow-md z-10" :style="{ top: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem', padding: `${0.1 * sizeMultiplier}rem ${0.25 * sizeMultiplier}rem` }">
-      <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }">Episode #{{ recentEpisodeNumber }}</p>
+    <div v-if="recentEpisodeNumber !== null && !isHovering && !isSelectionMode && !processing" class="absolute rounded-lg bg-black bg-opacity-90 box-shadow-md z-10" :style="{ top: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem', padding: `${0.1 * sizeMultiplier}rem ${0.25 * sizeMultiplier}rem` }">
+      <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }">
+        Episode<span v-if="recentEpisodeNumber"> #{{ recentEpisodeNumber }}</span>
+      </p>
     </div>
 
     <!-- Podcast Num Episodes -->
@@ -190,6 +195,12 @@ export default {
     isPodcast() {
       return this.mediaType === 'podcast'
     },
+    isMusic() {
+      return this.mediaType === 'music'
+    },
+    isExplicit() {
+      return this.mediaMetadata.explicit || false
+    },
     placeholderUrl() {
       const config = this.$config || this.$nuxt.$config
       return `${config.routerBasePath}/book_placeholder.jpg`
@@ -233,7 +244,7 @@ export default {
       if (this.recentEpisode.episode) {
         return this.recentEpisode.episode.replace(/^#/, '')
       }
-      return this.recentEpisode.index
+      return ''
     },
     collapsedSeries() {
       // Only added to item object when collapseSeries is enabled
@@ -257,7 +268,7 @@ export default {
       return this.bookCoverAspectRatio === 1
     },
     sizeMultiplier() {
-      var baseSize = this.squareAspectRatio ? 192 : 120
+      const baseSize = this.squareAspectRatio ? 192 : 120
       return this.width / baseSize
     },
     title() {
@@ -273,6 +284,10 @@ export default {
     authorLF() {
       return this.mediaMetadata.authorNameLF
     },
+    artist() {
+      const artists = this.mediaMetadata.artists || []
+      return artists.join(', ')
+    },
     displayTitle() {
       if (this.recentEpisode) return this.recentEpisode.title
       const ignorePrefix = this.orderBy === 'media.metadata.title' && this.sortingIgnorePrefix
@@ -282,6 +297,7 @@ export default {
     displayLineTwo() {
       if (this.recentEpisode) return this.title
       if (this.isPodcast) return this.author
+      if (this.isMusic) return this.artist
       if (this.collapsedSeries) return ''
       if (this.isAuthorBookshelfView) {
         return this.mediaMetadata.publishedYear || ''
@@ -305,11 +321,17 @@ export default {
       return this.store.getters['user/getUserMediaProgress'](this.libraryItemId, this.recentEpisode.id)
     },
     userProgress() {
+      if (this.isMusic) return null
       if (this.episodeProgress) return this.episodeProgress
       return this.store.getters['user/getUserMediaProgress'](this.libraryItemId)
     },
+    useEBookProgress() {
+      if (!this.userProgress || this.userProgress.progress) return false
+      return this.userProgress.ebookProgress > 0
+    },
     userProgressPercent() {
-      return this.userProgress ? this.userProgress.progress || 0 : 0
+      if (this.useEBookProgress) return Math.max(Math.min(1, this.userProgress.ebookProgress), 0)
+      return this.userProgress ? Math.max(Math.min(1, this.userProgress.progress), 0) || 0 : 0
     },
     itemIsFinished() {
       return this.userProgress ? !!this.userProgress.isFinished : false
@@ -341,7 +363,7 @@ export default {
       return !this.isSelectionMode && !this.showPlayButton && this.hasEbook && (this.showExperimentalFeatures || this.enableEReader)
     },
     showPlayButton() {
-      return !this.isSelectionMode && !this.isMissing && !this.isInvalid && !this.isStreaming && (this.numTracks || this.recentEpisode)
+      return !this.isSelectionMode && !this.isMissing && !this.isInvalid && !this.isStreaming && (this.numTracks || this.recentEpisode || this.isMusic)
     },
     showSmallEBookIcon() {
       return !this.isSelectionMode && this.hasEbook && (this.showExperimentalFeatures || this.enableEReader)
@@ -366,7 +388,7 @@ export default {
         if (this.isPodcast) return 'Podcast has no episodes'
         return 'Item has no audio tracks & ebook'
       }
-      var txt = ''
+      let txt = ''
       if (this.numMissingParts) {
         txt += `${this.numMissingParts} missing parts.`
       }
@@ -377,7 +399,7 @@ export default {
       return txt || 'Unknown Error'
     },
     overlayWrapperClasslist() {
-      var classes = []
+      const classes = []
       if (this.isSelectionMode) classes.push('bg-opacity-60')
       else classes.push('bg-opacity-40')
       if (this.selected) {
@@ -401,6 +423,8 @@ export default {
       return this.store.getters['user/getIsAdminOrUp']
     },
     moreMenuItems() {
+      if (this.isMusic) return []
+
       if (this.recentEpisode) {
         const items = [
           {
@@ -410,6 +434,10 @@ export default {
           {
             func: 'toggleFinished',
             text: this.itemIsFinished ? this.$strings.MessageMarkAsNotFinished : this.$strings.MessageMarkAsFinished
+          },
+          {
+            func: 'openPlaylists',
+            text: this.$strings.LabelAddToPlaylist
           }
         ]
         if (this.continueListeningShelf) {
@@ -434,7 +462,7 @@ export default {
         return items
       }
 
-      var items = []
+      let items = []
       if (!this.isPodcast) {
         items = [
           {
@@ -446,6 +474,12 @@ export default {
           items.push({
             func: 'openCollections',
             text: this.$strings.LabelAddToCollection
+          })
+        }
+        if (this.numTracks) {
+          items.push({
+            func: 'openPlaylists',
+            text: this.$strings.LabelAddToPlaylist
           })
         }
       }
@@ -492,6 +526,14 @@ export default {
           }
         }
       }
+
+      if (this.userCanDelete) {
+        items.push({
+          func: 'deleteLibraryItem',
+          text: this.$strings.ButtonDelete
+        })
+      }
+
       return items
     },
     _socket() {
@@ -524,11 +566,11 @@ export default {
       return this.author
     },
     isAlternativeBookshelfView() {
-      var constants = this.$constants || this.$nuxt.$constants
+      const constants = this.$constants || this.$nuxt.$constants
       return this.bookshelfView === constants.BookshelfView.DETAIL
     },
     isAuthorBookshelfView() {
-      var constants = this.$constants || this.$nuxt.$constants
+      const constants = this.$constants || this.$nuxt.$constants
       return this.bookshelfView === constants.BookshelfView.AUTHOR
     },
     titleDisplayBottomOffset() {
@@ -538,7 +580,7 @@ export default {
     },
     rssFeed() {
       if (this.booksInSeries) return null
-      return this.store.getters['feeds/getFeedForItem'](this.libraryItemId)
+      return this._libraryItem.rssFeed || null
     }
   },
   methods: {
@@ -641,7 +683,7 @@ export default {
       const axios = this.$axios || this.$nuxt.$axios
       this.processing = true
       axios
-        .$get(`/api/items/${this.libraryItemId}/scan`)
+        .$post(`/api/items/${this.libraryItemId}/scan`)
         .then((data) => {
           var result = data.result
           if (!result) {
@@ -713,7 +755,7 @@ export default {
           episodeId: this.recentEpisode.id,
           title: this.recentEpisode.title,
           subtitle: this.mediaMetadata.title,
-          caption: this.recentEpisode.publishedAt ? `Published ${this.$formatDate(this.recentEpisode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+          caption: this.recentEpisode.publishedAt ? `Published ${this.$formatDate(this.recentEpisode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
           duration: this.recentEpisode.audioFile.duration || null,
           coverPath: this.media.coverPath || null
         }
@@ -738,6 +780,39 @@ export default {
     openCollections() {
       this.store.commit('setSelectedLibraryItem', this.libraryItem)
       this.store.commit('globals/setShowCollectionsModal', true)
+    },
+    openPlaylists() {
+      this.store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode: this.recentEpisode }])
+      this.store.commit('globals/setShowPlaylistsModal', true)
+    },
+    deleteLibraryItem() {
+      const payload = {
+        message: 'This will delete the library item from the database and your file system. Are you sure?',
+        checkboxLabel: 'Delete from file system. Uncheck to only remove from database.',
+        yesButtonText: this.$strings.ButtonDelete,
+        yesButtonColor: 'error',
+        checkboxDefaultValue: true,
+        callback: (confirmed, hardDelete) => {
+          if (confirmed) {
+            this.processing = true
+            const axios = this.$axios || this.$nuxt.$axios
+            axios
+              .$delete(`/api/items/${this.libraryItemId}?hard=${hardDelete ? 1 : 0}`)
+              .then(() => {
+                this.$toast.success('Item deleted')
+              })
+              .catch((error) => {
+                console.error('Failed to delete item', error)
+                this.$toast.error('Failed to delete item')
+              })
+              .finally(() => {
+                this.processing = false
+              })
+          }
+        },
+        type: 'yesNo'
+      }
+      this.store.commit('globals/setConfirmPrompt', payload)
     },
     createMoreMenu() {
       if (!this.$refs.moreIcon) return
@@ -795,7 +870,6 @@ export default {
         return null
       })
       if (!libraryItem) return
-      console.log('Got library itemn', libraryItem)
       this.store.commit('showEReader', libraryItem)
     },
     selectBtnClick(evt) {
@@ -834,7 +908,7 @@ export default {
                   episodeId: episode.id,
                   title: episode.title,
                   subtitle: this.mediaMetadata.title,
-                  caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+                  caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
                   duration: episode.audioFile.duration || null,
                   coverPath: this.media.coverPath || null
                 })

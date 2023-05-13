@@ -2,7 +2,7 @@
   <modals-modal v-model="show" name="bookmarks" :width="500" :height="'unset'">
     <template #outer>
       <div class="absolute top-0 left-0 p-5 w-2/3 overflow-hidden">
-        <p class="font-book text-3xl text-white truncate">{{ $strings.LabelYourBookmarks }}</p>
+        <p class="text-3xl text-white truncate">{{ $strings.LabelYourBookmarks }}</p>
       </div>
     </template>
     <div ref="container" class="w-full rounded-lg bg-bg box-shadow-md overflow-y-auto overflow-x-hidden" style="max-height: 80vh">
@@ -24,7 +24,7 @@
             <div class="flex-grow px-2">
               <ui-text-input v-model="newBookmarkTitle" placeholder="Note" class="w-full" />
             </div>
-            <ui-btn type="submit" color="success" :padding-x="4" class="h-10"><span class="material-icons -mt-px">add</span></ui-btn>
+            <ui-btn type="submit" color="success" :padding-x="4" class="h-10"><span class="material-icons text-2xl -mt-px">add</span></ui-btn>
           </div>
         </form>
       </div>
@@ -73,6 +73,12 @@ export default {
     },
     canCreateBookmark() {
       return !this.bookmarks.find((bm) => bm.time === this.currentTime)
+    },
+    dateFormat() {
+      return this.$store.state.serverSettings.dateFormat
+    },
+    timeFormat() {
+      return this.$store.state.serverSettings.timeFormat
     }
   },
   methods: {
@@ -111,7 +117,7 @@ export default {
     },
     submitCreateBookmark() {
       if (!this.newBookmarkTitle) {
-        this.newBookmarkTitle = this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
+        this.newBookmarkTitle = this.$formatDatetime(Date.now(), this.dateFormat, this.timeFormat)
       }
       var bookmark = {
         title: this.newBookmarkTitle,

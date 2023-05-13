@@ -47,10 +47,15 @@ class CacheManager {
 
     res.type(`image/${format}`)
 
-    var path = Path.join(this.CoverCachePath, `${libraryItem.id}_${width}${height ? `x${height}` : ''}`) + '.' + format
+    const path = Path.join(this.CoverCachePath, `${libraryItem.id}_${width}${height ? `x${height}` : ''}`) + '.' + format
 
     // Cache exists
     if (await fs.pathExists(path)) {
+      if (global.XAccel) {
+        Logger.debug(`Use X-Accel to serve static file ${path}`)
+        return res.status(204).header({'X-Accel-Redirect': global.XAccel + path}).send()
+      }
+
       const r = fs.createReadStream(path)
       const ps = new stream.PassThrough()
       stream.pipeline(r, ps, (err) => {
@@ -66,11 +71,16 @@ class CacheManager {
       return res.sendStatus(500)
     }
 
-    let writtenFile = await resizeImage(libraryItem.media.coverPath, path, width, height)
+    const writtenFile = await resizeImage(libraryItem.media.coverPath, path, width, height)
     if (!writtenFile) return res.sendStatus(500)
 
     // Set owner and permissions of cache image
     await filePerms.setDefault(path)
+
+    if (global.XAccel) {
+      Logger.debug(`Use X-Accel to serve static file ${writtenFile}`)
+      return res.status(204).header({'X-Accel-Redirect': global.XAccel + writtenFile}).send()
+    }
 
     var readStream = fs.createReadStream(writtenFile)
     readStream.pipe(res)
@@ -139,14 +149,14 @@ class CacheManager {
       stream.pipeline(r, ps, (err) => {
         if (err) {
           console.log(err)
-          return res.sendStatus(400)
+          return res.sendStatus(500)
         }
       })
       return ps.pipe(res)
     }
 
     let writtenFile = await resizeImage(author.imagePath, path, width, height)
-    if (!writtenFile) return res.sendStatus(400)
+    if (!writtenFile) return res.sendStatus(500)
 
     // Set owner and permissions of cache image
     await filePerms.setDefault(path)

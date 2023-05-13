@@ -1,5 +1,4 @@
 const Path = require('path')
-const fs = require('fs')
 const Logger = require('../Logger')
 const { parseString } = require("xml2js")
 const areEquivalent = require('./areEquivalent')
@@ -101,8 +100,6 @@ function secondsToTimestamp(seconds, includeMs = false, alwaysIncludeHours = fal
 }
 module.exports.secondsToTimestamp = secondsToTimestamp
 
-module.exports.msToTimestamp = (ms, includeMs) => secondsToTimestamp(ms / 1000, includeMs)
-
 module.exports.reqSupportsWebp = (req) => {
   if (!req || !req.headers || !req.headers.accept) return false
   return req.headers.accept.includes('image/webp') || req.headers.accept === '*/*'
@@ -111,7 +108,7 @@ module.exports.reqSupportsWebp = (req) => {
 module.exports.areEquivalent = areEquivalent
 
 module.exports.copyValue = (val) => {
-  if (!val) return null
+  if (!val) return val === false ? false : null
   if (!this.isObject(val)) return val
 
   if (Array.isArray(val)) {
@@ -123,10 +120,6 @@ module.exports.copyValue = (val) => {
     }
     return final
   }
-}
-
-module.exports.encodeUriPath = (path) => {
-  return path.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23')
 }
 
 module.exports.toNumber = (val, fallback = 0) => {

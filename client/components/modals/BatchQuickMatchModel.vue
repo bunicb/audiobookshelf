@@ -2,7 +2,7 @@
   <modals-modal v-model="show" name="batchQuickMatch" :processing="processing" :width="500" :height="'unset'">
     <template #outer>
       <div class="absolute top-0 left-0 p-5 w-2/3 overflow-hidden">
-        <p class="font-book text-3xl text-white truncate">{{ title }}</p>
+        <p class="text-3xl text-white truncate">{{ title }}</p>
       </div>
     </template>
 
@@ -19,7 +19,7 @@
             <ui-tooltip :text="$strings.LabelUpdateCoverHelp">
               <p class="pl-4">
                 {{ $strings.LabelUpdateCover }}
-                <span class="material-icons icon-text text-sm">info_outlined</span>
+                <span class="material-icons icon-text">info_outlined</span>
               </p>
             </ui-tooltip>
           </div>
@@ -28,7 +28,7 @@
             <ui-tooltip :text="$strings.LabelUpdateDetailsHelp">
               <p class="pl-4">
                 {{ $strings.LabelUpdateDetails }}
-                <span class="material-icons icon-text text-sm">info_outlined</span>
+                <span class="material-icons icon-text">info_outlined</span>
               </p>
             </ui-tooltip>
           </div>
@@ -82,7 +82,7 @@ export default {
       return this.$store.state.globals.showBatchQuickMatchModal
     },
     selectedBookIds() {
-      return this.$store.state.selectedLibraryItems || []
+      return (this.$store.state.globals.selectedMediaItems || []).map((i) => i.id)
     },
     currentLibraryId() {
       return this.$store.state.libraries.currentLibraryId

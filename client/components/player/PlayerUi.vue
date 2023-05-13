@@ -4,27 +4,37 @@
       <div class="absolute -top-10 md:top-0 right-0 lg:right-2 flex items-center h-full">
         <!-- <span class="material-icons text-2xl cursor-pointer" @click="toggleFullscreen(true)">expand_less</span> -->
 
-        <controls-volume-control ref="volumeControl" v-model="volume" @input="setVolume" class="mx-2 hidden md:block" />
+        <ui-tooltip direction="top" :text="$strings.LabelVolume">
+          <controls-volume-control ref="volumeControl" v-model="volume" @input="setVolume" class="mx-2 hidden md:block" />
+        </ui-tooltip>
 
-        <div class="cursor-pointer text-gray-300 hover:text-white mx-1 lg:mx-2" @mousedown.prevent @mouseup.prevent @click.stop="$emit('showSleepTimer')">
-          <span v-if="!sleepTimerSet" class="material-icons text-2xl sm:text-2.5xl">snooze</span>
-          <div v-else class="flex items-center">
-            <span class="material-icons text-lg text-warning">snooze</span>
-            <p class="text-xl text-warning font-mono font-semibold text-center px-0.5 pb-0.5" style="min-width: 30px">{{ sleepTimerRemainingString }}</p>
+        <ui-tooltip direction="top" :text="$strings.LabelSleepTimer">
+          <div class="cursor-pointer text-gray-300 hover:text-white mx-1 lg:mx-2" @mousedown.prevent @mouseup.prevent @click.stop="$emit('showSleepTimer')">
+            <span v-if="!sleepTimerSet" class="material-icons text-2xl">snooze</span>
+            <div v-else class="flex items-center">
+              <span class="material-icons text-lg text-warning">snooze</span>
+              <p class="text-xl text-warning font-mono font-semibold text-center px-0.5 pb-0.5" style="min-width: 30px">{{ sleepTimerRemainingString }}</p>
+            </div>
           </div>
-        </div>
+        </ui-tooltip>
 
-        <div v-if="!isPodcast" class="cursor-pointer text-gray-300 hover:text-white mx-1 lg:mx-2" @mousedown.prevent @mouseup.prevent @click.stop="$emit('showBookmarks')">
-          <span class="material-icons text-2xl sm:text-2.5xl">{{ bookmarks.length ? 'bookmarks' : 'bookmark_border' }}</span>
-        </div>
+        <ui-tooltip v-if="!isPodcast" direction="top" :text="$strings.LabelViewBookmarks">
+          <div class="cursor-pointer text-gray-300 hover:text-white mx-1 lg:mx-2" @mousedown.prevent @mouseup.prevent @click.stop="$emit('showBookmarks')">
+            <span class="material-icons text-2xl">{{ bookmarks.length ? 'bookmarks' : 'bookmark_border' }}</span>
+          </div>
+        </ui-tooltip>
 
-        <div v-if="chapters.length" class="cursor-pointer text-gray-300 hover:text-white mx-1 lg:mx-2" @mousedown.prevent @mouseup.prevent @click.stop="showChapters">
-          <span class="material-icons text-2xl sm:text-3xl">format_list_bulleted</span>
-        </div>
+        <ui-tooltip v-if="chapters.length" direction="top" :text="$strings.LabelViewChapters">
+          <div class="cursor-pointer text-gray-300 hover:text-white mx-1 lg:mx-2" @mousedown.prevent @mouseup.prevent @click.stop="showChapters">
+            <span class="material-icons text-2xl">format_list_bulleted</span>
+          </div>
+        </ui-tooltip>
 
-        <button v-if="playerQueueItems.length" class="outline-none text-gray-300 mx-1 lg:mx-2 hover:text-white" @mousedown.prevent @mouseup.prevent @click.stop="$emit('showPlayerQueueItems')">
-          <span class="material-icons text-2xl sm:text-3xl">queue_music</span>
-        </button>
+        <ui-tooltip v-if="playerQueueItems.length" direction="top" :text="$strings.LabelViewQueue">
+          <button class="outline-none text-gray-300 mx-1 lg:mx-2 hover:text-white" @mousedown.prevent @mouseup.prevent @click.stop="$emit('showPlayerQueueItems')">
+            <span class="material-icons text-2.5xl sm:text-3xl">playlist_play</span>
+          </button>
+        </ui-tooltip>
 
         <ui-tooltip v-if="chapters.length" direction="top" :text="useChapterTrack ? $strings.LabelUseFullTrack : $strings.LabelUseChapterTrack">
           <div class="cursor-pointer text-gray-300 mx-1 lg:mx-2 hover:text-white" @mousedown.prevent @mouseup.prevent @click.stop="setUseChapterTrack">
@@ -36,7 +46,7 @@
       <player-playback-controls :loading="loading" :seek-loading="seekLoading" :playback-rate.sync="playbackRate" :paused="paused" :has-next-chapter="hasNextChapter" @prevChapter="prevChapter" @nextChapter="nextChapter" @jumpForward="jumpForward" @jumpBackward="jumpBackward" @setPlaybackRate="setPlaybackRate" @playPause="playPause" />
     </div>
 
-    <player-track-bar ref="trackbar" :loading="loading" :chapters="chapters" :duration="duration" :current-chapter="currentChapter" @seek="seek" />
+    <player-track-bar ref="trackbar" :loading="loading" :chapters="chapters" :duration="duration" :current-chapter="currentChapter" :playback-rate="playbackRate" @seek="seek" />
 
     <div class="flex">
       <p ref="currentTimestamp" class="font-mono text-xxs sm:text-sm text-gray-100 pointer-events-auto">00:00:00</p>
@@ -49,7 +59,7 @@
       <p class="font-mono text-xxs sm:text-sm text-gray-100 pointer-events-auto">{{ timeRemainingPretty }}</p>
     </div>
 
-    <modals-chapters-modal v-model="showChaptersModal" :current-chapter="currentChapter" :chapters="chapters" @select="selectChapter" />
+    <modals-chapters-modal v-model="showChaptersModal" :current-chapter="currentChapter" :playback-rate="playbackRate" :chapters="chapters" @select="selectChapter" />
   </div>
 </template>
 
@@ -80,6 +90,11 @@ export default {
       currentTime: 0,
       duration: 0,
       useChapterTrack: false
+    }
+  },
+  watch: {
+    playbackRate() {
+      this.updateTimestamp()
     }
   },
   computed: {
@@ -203,18 +218,14 @@ export default {
       }
     },
     increasePlaybackRate() {
-      var rates = [0.25, 0.5, 0.8, 1, 1.3, 1.5, 2, 2.5, 3]
-      var currentRateIndex = rates.findIndex((r) => r === this.playbackRate)
-      if (currentRateIndex >= rates.length - 1) return
-      this.playbackRate = rates[currentRateIndex + 1] || 1
-      this.playbackRateChanged(this.playbackRate)
+      if (this.playbackRate >= 10) return
+      this.playbackRate = Number((this.playbackRate + 0.1).toFixed(1))
+      this.setPlaybackRate(this.playbackRate)
     },
     decreasePlaybackRate() {
-      var rates = [0.25, 0.5, 0.8, 1, 1.3, 1.5, 2, 2.5, 3]
-      var currentRateIndex = rates.findIndex((r) => r === this.playbackRate)
-      if (currentRateIndex <= 0) return
-      this.playbackRate = rates[currentRateIndex - 1] || 1
-      this.playbackRateChanged(this.playbackRate)
+      if (this.playbackRate <= 0.5) return
+      this.playbackRate = Number((this.playbackRate - 0.1).toFixed(1))
+      this.setPlaybackRate(this.playbackRate)
     },
     setPlaybackRate(playbackRate) {
       this.$emit('setPlaybackRate', playbackRate)
@@ -224,13 +235,10 @@ export default {
       this.showChaptersModal = false
     },
     setUseChapterTrack() {
-      var useChapterTrack = !this.useChapterTrack
-      this.useChapterTrack = useChapterTrack
-      if (this.$refs.trackbar) this.$refs.trackbar.setUseChapterTrack(useChapterTrack)
+      this.useChapterTrack = !this.useChapterTrack
+      if (this.$refs.trackbar) this.$refs.trackbar.setUseChapterTrack(this.useChapterTrack)
 
-      this.$store.dispatch('user/updateUserSettings', { useChapterTrack }).catch((err) => {
-        console.error('Failed to update settings', err)
-      })
+      this.$store.dispatch('user/updateUserSettings', { useChapterTrack: this.useChapterTrack })
       this.updateTimestamp()
     },
     checkUpdateChapterTrack() {
@@ -282,14 +290,13 @@ export default {
       if (this.$refs.trackbar) this.$refs.trackbar.setPercentageReady(percentageReady)
     },
     updateTimestamp() {
-      var ts = this.$refs.currentTimestamp
+      const ts = this.$refs.currentTimestamp
       if (!ts) {
         console.error('No timestamp el')
         return
       }
       const time = this.useChapterTrack ? Math.max(0, this.currentTime - this.currentChapterStart) : this.currentTime
-      var currTimeClean = this.$secondsToTimestamp(time)
-      ts.innerText = currTimeClean
+      ts.innerText = this.$secondsToTimestamp(time / this.playbackRate)
     },
     setBufferTime(bufferTime) {
       if (this.$refs.trackbar) this.$refs.trackbar.setBufferTime(bufferTime)
@@ -301,11 +308,11 @@ export default {
     init() {
       this.playbackRate = this.$store.getters['user/getUserSetting']('playbackRate') || 1
 
-      var _useChapterTrack = this.$store.getters['user/getUserSetting']('useChapterTrack') || false
+      const _useChapterTrack = this.$store.getters['user/getUserSetting']('useChapterTrack') || false
       this.useChapterTrack = this.chapters.length ? _useChapterTrack : false
 
       if (this.$refs.trackbar) this.$refs.trackbar.setUseChapterTrack(this.useChapterTrack)
-      this.$emit('setPlaybackRate', this.playbackRate)
+      this.setPlaybackRate(this.playbackRate)
     },
     settingsUpdated(settings) {
       if (settings.playbackRate && this.playbackRate !== settings.playbackRate) {
@@ -335,13 +342,14 @@ export default {
     }
   },
   mounted() {
-    this.$store.commit('user/addSettingsListener', { id: 'audioplayer', meth: this.settingsUpdated })
-    this.init()
     this.$eventBus.$on('player-hotkey', this.hotkey)
+    this.$eventBus.$on('user-settings', this.settingsUpdated)
+
+    this.init()
   },
   beforeDestroy() {
-    this.$store.commit('user/removeSettingsListener', 'audioplayer')
     this.$eventBus.$off('player-hotkey', this.hotkey)
+    this.$eventBus.$off('user-settings', this.settingsUpdated)
   }
 }
 </script>

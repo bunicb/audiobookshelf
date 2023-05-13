@@ -26,7 +26,7 @@ export const state = () => ({
       value: 'audible.uk'
     },
     {
-      text: 'Audible.co.au',
+      text: 'Audible.com.au',
       value: 'audible.au'
     },
     {
@@ -52,12 +52,22 @@ export const state = () => ({
     {
       text: 'Audible.es',
       value: 'audible.es'
+    },
+    {
+      text: 'FantLab.ru',
+      value: 'fantlab'
     }
   ],
   podcastProviders: [
     {
       text: 'iTunes',
       value: 'itunes'
+    }
+  ],
+  coverOnlyProviders: [
+    {
+      text: 'AudiobookCovers.com',
+      value: 'audiobookcovers'
     }
   ]
 })

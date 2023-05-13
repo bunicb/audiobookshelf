@@ -6,7 +6,7 @@
         <div ref="inputWrapper" style="min-height: 36px" class="flex-wrap relative w-full shadow-sm flex items-center border border-gray-600 rounded px-2 py-0.5" :class="wrapperClass" @click.stop.prevent="clickWrapper" @mouseup.stop.prevent @mousedown.prevent>
           <div v-for="item in selected" :key="item.id" class="rounded-full px-2 py-0.5 m-0.5 text-xs bg-bg flex flex-nowrap whitespace-nowrap items-center justify-center relative min-w-12">
             <div v-if="!disabled" class="w-full h-full rounded-full absolute top-0 left-0 opacity-0 hover:opacity-100 px-1 bg-bg bg-opacity-75 flex items-center justify-end cursor-pointer">
-              <span v-if="showEdit" class="material-icons text-white hover:text-warning mr-1" style="font-size: 1rem" @click.stop="editItem(item)">edit</span>
+              <span v-if="showEdit" class="material-icons text-base text-white hover:text-warning mr-1" @click.stop="editItem(item)">edit</span>
               <span class="material-icons text-white hover:text-error" style="font-size: 1.1rem" @click.stop="removeItem(item.id)">close</span>
             </div>
             {{ item[textKey] }}
@@ -18,7 +18,7 @@
         </div>
       </form>
 
-      <ul ref="menu" v-show="showMenu" class="absolute z-50 mt-1 w-full bg-bg border border-black-200 shadow-lg max-h-56 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm" role="listbox" aria-labelledby="listbox-label">
+      <ul ref="menu" v-show="showMenu" class="absolute z-60 w-full bg-bg border border-black-200 shadow-lg max-h-56 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm" role="listbox" aria-labelledby="listbox-label">
         <template v-for="item in itemsToShow">
           <li :key="item.id" class="text-gray-50 select-none relative py-2 pr-9 cursor-pointer hover:bg-black-400" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
             <div class="flex items-center">
@@ -113,10 +113,14 @@ export default {
       if (this.searching) return
       this.currentSearch = this.textInput
       this.searching = true
-      var results = await this.$axios.$get(`/api/${this.endpoint}?q=${this.currentSearch}&limit=15&token=${this.userToken}`).catch((error) => {
-        console.error('Failed to get search results', error)
-        return []
-      })
+      const results = await this.$axios
+        .$get(`/api/${this.endpoint}?q=${this.currentSearch}&limit=15&token=${this.userToken}`)
+        .then((res) => res.results || res)
+        .catch((error) => {
+          console.error('Failed to get search results', error)
+          return []
+        })
+
       this.items = results || []
       this.searching = false
     },
@@ -136,7 +140,7 @@ export default {
       }, 50)
     },
     recalcMenuPos() {
-      if (!this.menu) return
+      if (!this.menu || !this.$refs.inputWrapper) return
       var boundingBox = this.$refs.inputWrapper.getBoundingClientRect()
       if (boundingBox.y > window.innerHeight - 8) {
         // Input is off the page
@@ -154,7 +158,7 @@ export default {
       this.menu.style.width = boundingBox.width + 'px'
     },
     unmountMountMenu() {
-      if (!this.$refs.menu) return
+      if (!this.$refs.menu || !this.$refs.inputWrapper) return
       this.menu = this.$refs.menu
 
       var boundingBox = this.$refs.inputWrapper.getBoundingClientRect()
@@ -200,15 +204,21 @@ export default {
       }
       if (this.$refs.input) this.$refs.input.focus()
 
-      var newSelected = null
+      let newSelected = null
       if (this.getIsSelected(item.id)) {
         newSelected = this.selected.filter((s) => s.id !== item.id)
         this.$emit('removedItem', item.id)
       } else {
-        newSelected = this.selected.concat([item])
+        newSelected = this.selected.concat([
+          {
+            id: item.id,
+            name: item.name
+          }
+        ])
       }
       this.textInput = null
       this.currentSearch = null
+
       this.$emit('input', newSelected)
       this.$nextTick(() => {
         this.recalcMenuPos()
@@ -242,10 +252,11 @@ export default {
     submitForm() {
       if (!this.textInput) return
 
-      var cleaned = this.textInput.trim()
-      var matchesItem = this.items.find((i) => {
-        return i === cleaned
+      const cleaned = this.textInput.trim()
+      const matchesItem = this.items.find((i) => {
+        return i.name === cleaned
       })
+
       if (matchesItem) {
         this.clickedOption(null, matchesItem)
       } else {

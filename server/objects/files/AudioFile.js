@@ -102,7 +102,7 @@ class AudioFile {
   }
 
   get mimeType() {
-    var format = this.metadata.format.toUpperCase()
+    const format = this.metadata.format.toUpperCase()
     if (AudioMimeType[format]) {
       return AudioMimeType[format]
     } else {
@@ -131,7 +131,7 @@ class AudioFile {
     this.channels = probeData.channels
     this.channelLayout = probeData.channelLayout
     this.chapters = probeData.chapters || []
-    this.metaTags = probeData.audioFileMetadata
+    this.metaTags = probeData.audioMetaTags
     this.embeddedCoverArt = probeData.embeddedCoverArt
   }
 
@@ -147,7 +147,7 @@ class AudioFile {
       return false
     }
 
-    var hasUpdates = false
+    let hasUpdates = false
     for (let i = 0; i < updatedChapters.length; i++) {
       if (JSON.stringify(updatedChapters[i]) !== JSON.stringify(this.chapters[i])) {
         hasUpdates = true
@@ -163,28 +163,11 @@ class AudioFile {
     return new AudioFile(this.toJSON())
   }
 
-  // If the file or parent directory was renamed it is synced here
-  syncFile(newFile) {
-    // TODO: Sync file would update the file info if needed
-    return false
-    // var hasUpdates = false
-    // var keysToSync = ['path', 'relPath', 'ext', 'filename']
-    // keysToSync.forEach((key) => {
-    //   if (newFile[key] !== undefined && newFile[key] !== this[key]) {
-    //     hasUpdates = true
-    //     this[key] = newFile[key]
-    //   }
-    // })
-    // return hasUpdates
-  }
-
   updateFromScan(scannedAudioFile) {
-    var hasUpdated = false
+    let hasUpdated = false
 
-    var newjson = scannedAudioFile.toJSON()
-    if (this.manuallyVerified) newjson.manuallyVerified = true
-    if (this.exclude) newjson.exclude = true
-    newjson.addedAt = this.addedAt
+    const newjson = scannedAudioFile.toJSON()
+    const ignoreKeys = ['manuallyVerified', 'exclude', 'addedAt', 'updatedAt']
 
     for (const key in newjson) {
       if (key === 'metadata') {
@@ -200,7 +183,7 @@ class AudioFile {
         if (this.syncChapters(newjson.chapters || [])) {
           hasUpdated = true
         }
-      } else if (this[key] !== newjson[key]) {
+      } else if (!ignoreKeys.includes(key) && this[key] !== newjson[key]) {
         this[key] = newjson[key]
         hasUpdated = true
       }

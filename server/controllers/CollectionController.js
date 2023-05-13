@@ -1,4 +1,6 @@
 const Logger = require('../Logger')
+const SocketAuthority = require('../SocketAuthority')
+
 const Collection = require('../objects/Collection')
 
 class CollectionController {
@@ -13,41 +15,55 @@ class CollectionController {
     }
     var jsonExpanded = newCollection.toJSONExpanded(this.db.libraryItems)
     await this.db.insertEntity('collection', newCollection)
-    this.emitter('collection_added', jsonExpanded)
+    SocketAuthority.emitter('collection_added', jsonExpanded)
     res.json(jsonExpanded)
   }
 
   findAll(req, res) {
-    var expandedCollections = this.db.collections.map(c => c.toJSONExpanded(this.db.libraryItems))
-    res.json(expandedCollections)
+    res.json({
+      collections: this.db.collections.map(c => c.toJSONExpanded(this.db.libraryItems))
+    })
   }
 
   findOne(req, res) {
-    res.json(req.collection.toJSONExpanded(this.db.libraryItems))
+    const includeEntities = (req.query.include || '').split(',')
+
+    const collectionExpanded = req.collection.toJSONExpanded(this.db.libraryItems)
+
+    if (includeEntities.includes('rssfeed')) {
+      const feedData = this.rssFeedManager.findFeedForEntityId(collectionExpanded.id)
+      collectionExpanded.rssFeed = feedData ? feedData.toJSONMinified() : null
+    }
+
+    res.json(collectionExpanded)
   }
 
   async update(req, res) {
     const collection = req.collection
-    var wasUpdated = collection.update(req.body)
-    var jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
+    const wasUpdated = collection.update(req.body)
+    const jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
     if (wasUpdated) {
       await this.db.updateEntity('collection', collection)
-      this.emitter('collection_updated', jsonExpanded)
+      SocketAuthority.emitter('collection_updated', jsonExpanded)
     }
     res.json(jsonExpanded)
   }
 
   async delete(req, res) {
     const collection = req.collection
-    var jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
+    const jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
+
+    // Close rss feed - remove from db and emit socket event
+    await this.rssFeedManager.closeFeedForEntityId(collection.id)
+
     await this.db.removeEntity('collection', collection.id)
-    this.emitter('collection_removed', jsonExpanded)
+    SocketAuthority.emitter('collection_removed', jsonExpanded)
     res.sendStatus(200)
   }
 
   async addBook(req, res) {
     const collection = req.collection
-    var libraryItem = this.db.libraryItems.find(li => li.id === req.body.id)
+    const libraryItem = this.db.libraryItems.find(li => li.id === req.body.id)
     if (!libraryItem) {
       return res.status(500).send('Book not found')
     }
@@ -58,9 +74,9 @@ class CollectionController {
       return res.status(500).send('Book already in collection')
     }
     collection.addBook(req.body.id)
-    var jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
+    const jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
     await this.db.updateEntity('collection', collection)
-    this.emitter('collection_updated', jsonExpanded)
+    SocketAuthority.emitter('collection_updated', jsonExpanded)
     res.json(jsonExpanded)
   }
 
@@ -71,7 +87,7 @@ class CollectionController {
       collection.removeBook(req.params.bookId)
       var jsonExpanded = collection.toJSONExpanded(this.db.libraryItems)
       await this.db.updateEntity('collection', collection)
-      this.emitter('collection_updated', jsonExpanded)
+      SocketAuthority.emitter('collection_updated', jsonExpanded)
     }
     res.json(collection.toJSONExpanded(this.db.libraryItems))
   }
@@ -92,7 +108,7 @@ class CollectionController {
     }
     if (hasUpdated) {
       await this.db.updateEntity('collection', collection)
-      this.emitter('collection_updated', collection.toJSONExpanded(this.db.libraryItems))
+      SocketAuthority.emitter('collection_updated', collection.toJSONExpanded(this.db.libraryItems))
     }
     res.json(collection.toJSONExpanded(this.db.libraryItems))
   }
@@ -113,14 +129,14 @@ class CollectionController {
     }
     if (hasUpdated) {
       await this.db.updateEntity('collection', collection)
-      this.emitter('collection_updated', collection.toJSONExpanded(this.db.libraryItems))
+      SocketAuthority.emitter('collection_updated', collection.toJSONExpanded(this.db.libraryItems))
     }
     res.json(collection.toJSONExpanded(this.db.libraryItems))
   }
 
   middleware(req, res, next) {
     if (req.params.id) {
-      var collection = this.db.collections.find(c => c.id === req.params.id)
+      const collection = this.db.collections.find(c => c.id === req.params.id)
       if (!collection) {
         return res.status(404).send('Collection not found')
       }

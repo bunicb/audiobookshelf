@@ -4,29 +4,58 @@
 
     <div id="bookshelf" class="w-full overflow-y-auto px-2 py-6 sm:px-4 md:p-12 relative">
       <div class="w-full max-w-3xl mx-auto py-4">
-        <p class="text-xl mb-2 font-semibold">{{ $strings.HeaderLatestEpisodes }}</p>
+        <p class="text-xl mb-2 font-semibold px-4 md:px-0">{{ $strings.HeaderLatestEpisodes }}</p>
         <p v-if="!recentEpisodes.length && !processing" class="text-center text-xl">{{ $strings.MessageNoEpisodes }}</p>
         <template v-for="(episode, index) in episodesMapped">
           <div :key="episode.id" class="flex py-5 cursor-pointer relative" @click.stop="clickEpisode(episode)">
-            <covers-preview-cover :src="$store.getters['globals/getLibraryItemCoverSrcById'](episode.libraryItemId)" :width="96" :book-cover-aspect-ratio="bookCoverAspectRatio" :show-resolution="false" />
+            <covers-preview-cover :src="$store.getters['globals/getLibraryItemCoverSrcById'](episode.libraryItemId)" :width="96" :book-cover-aspect-ratio="bookCoverAspectRatio" :show-resolution="false" class="hidden md:block" />
             <div class="flex-grow pl-4 max-w-2xl">
-              <nuxt-link :to="`/item/${episode.libraryItemId}`" class="text-sm text-gray-200 hover:underline">{{ episode.podcast.metadata.title }}</nuxt-link>
+              <!-- mobile -->
+              <div class="flex md:hidden mb-2">
+                <covers-preview-cover :src="$store.getters['globals/getLibraryItemCoverSrcById'](episode.libraryItemId)" :width="48" :book-cover-aspect-ratio="bookCoverAspectRatio" :show-resolution="false" class="md:hidden" />
+                <div class="flex-grow px-2">
+                  <div class="flex items-center">
+                    <div class="flex" @click.stop>
+                      <nuxt-link :to="`/item/${episode.libraryItemId}`" class="text-sm text-gray-200 hover:underline">{{ episode.podcast.metadata.title }}</nuxt-link>
+                    </div>
+                    <widgets-explicit-indicator :explicit="episode.podcast.metadata.explicit" />
+                  </div>
+                  <p class="text-xs text-gray-300 mb-1">{{ $dateDistanceFromNow(episode.publishedAt) }}</p>
+                </div>
+              </div>
+              <!-- desktop -->
+              <div class="hidden md:block">
+                <div class="flex items-center">
+                  <div class="flex" @click.stop>
+                    <nuxt-link :to="`/item/${episode.libraryItemId}`" class="text-sm text-gray-200 hover:underline">{{ episode.podcast.metadata.title }}</nuxt-link>
+                  </div>
+                  <widgets-explicit-indicator :explicit="episode.podcast.metadata.explicit" />
+                </div>
+                <p class="text-xs text-gray-300 mb-1">{{ $dateDistanceFromNow(episode.publishedAt) }}</p>
+              </div>
 
-              <p class="text-xs text-gray-300 mb-1">{{ $dateDistanceFromNow(episode.publishedAt) }}</p>
+              <div class="flex items-center font-semibold text-gray-200">
+                <div v-if="episode.season || episode.episode">#</div>
+                <div v-if="episode.season">{{ episode.season }}x</div>
+                <div v-if="episode.episode">{{ episode.episode }}</div>
+              </div>
 
-              <p class="font-semibold mb-2">{{ episode.title }}</p>
+              <div class="flex items-center mb-2">
+                <div class="font-semibold text-sm md:text-base">{{ episode.title }}</div>
+                <widgets-podcast-type-indicator :type="episode.episodeType" />
+              </div>
 
-              <p class="text-sm text-gray-200 mb-4">{{ episode.subtitle }}</p>
+              <p class="text-sm text-gray-200 mb-4 episode-subtitle-long" v-html="episode.subtitle || episode.description" />
 
               <div class="flex items-center">
                 <button class="h-8 px-4 border border-white border-opacity-20 hover:bg-white hover:bg-opacity-10 rounded-full flex items-center justify-center cursor-pointer focus:outline-none" :class="episode.progress && episode.progress.isFinished ? 'text-white text-opacity-40' : ''" @click.stop="playClick(episode)">
-                  <span v-if="episodeIdStreaming === episode.id" class="material-icons" :class="streamIsPlaying ? '' : 'text-success'">{{ streamIsPlaying ? 'pause' : 'play_arrow' }}</span>
-                  <span v-else class="material-icons text-success">play_arrow</span>
+                  <span v-if="episodeIdStreaming === episode.id" class="material-icons text-2xl" :class="streamIsPlaying ? '' : 'text-success'">{{ streamIsPlaying ? 'pause' : 'play_arrow' }}</span>
+                  <span v-else class="material-icons text-2xl text-success">play_arrow</span>
                   <p class="pl-2 pr-1 text-sm font-semibold">{{ getButtonText(episode) }}</p>
                 </button>
 
                 <button v-if="libraryItemIdStreaming && !isStreamingFromDifferentLibrary" class="h-8 w-8 flex justify-center items-center mx-2" :class="playerQueueEpisodeIdMap[episode.id] ? 'text-success' : ''" @click.stop="queueBtnClick(episode)">
-                  <span class="material-icons-outlined">{{ playerQueueEpisodeIdMap[episode.id] ? 'playlist_add_check' : 'playlist_add' }}</span>
+                  <span class="material-icons-outlined text-2xl">{{ playerQueueEpisodeIdMap[episode.id] ? 'playlist_add_check' : 'playlist_add' }}</span>
                 </button>
               </div>
             </div>
@@ -101,6 +130,9 @@ export default {
         if (i.episodeId) episodeIds[i.episodeId] = true
       })
       return episodeIds
+    },
+    dateFormat() {
+      return this.$store.state.serverSettings.dateFormat
     }
   },
   methods: {
@@ -144,7 +176,7 @@ export default {
             episodeId: episode.id,
             title: episode.title,
             subtitle: episode.podcast.metadata.title,
-            caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+            caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
             duration: episode.duration || null,
             coverPath: episode.podcast.coverPath || null
           })
@@ -182,7 +214,7 @@ export default {
           episodeId: episode.id,
           title: episode.title,
           subtitle: episode.podcast.metadata.title,
-          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
           duration: episode.duration || null,
           coverPath: episode.podcast.coverPath || null
         }

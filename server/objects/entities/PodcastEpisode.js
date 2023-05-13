@@ -1,5 +1,6 @@
 const Path = require('path')
-const { getId } = require('../../utils/index')
+const Logger = require('../../Logger')
+const { getId, cleanStringForSearch, areEquivalent, copyValue } = require('../../utils/index')
 const AudioFile = require('../files/AudioFile')
 const AudioTrack = require('../files/AudioTrack')
 
@@ -17,6 +18,7 @@ class PodcastEpisode {
     this.description = null
     this.enclosure = null
     this.pubDate = null
+    this.chapters = []
 
     this.audioFile = null
     this.publishedAt = null
@@ -40,6 +42,7 @@ class PodcastEpisode {
     this.description = episode.description
     this.enclosure = episode.enclosure ? { ...episode.enclosure } : null
     this.pubDate = episode.pubDate
+    this.chapters = episode.chapters?.map(ch => ({ ...ch })) || []
     this.audioFile = new AudioFile(episode.audioFile)
     this.publishedAt = episode.publishedAt
     this.addedAt = episode.addedAt
@@ -61,6 +64,7 @@ class PodcastEpisode {
       description: this.description,
       enclosure: this.enclosure ? { ...this.enclosure } : null,
       pubDate: this.pubDate,
+      chapters: this.chapters.map(ch => ({ ...ch })),
       audioFile: this.audioFile.toJSON(),
       publishedAt: this.publishedAt,
       addedAt: this.addedAt,
@@ -81,6 +85,7 @@ class PodcastEpisode {
       description: this.description,
       enclosure: this.enclosure ? { ...this.enclosure } : null,
       pubDate: this.pubDate,
+      chapters: this.chapters.map(ch => ({ ...ch })),
       audioFile: this.audioFile.toJSON(),
       audioTrack: this.audioTrack.toJSON(),
       publishedAt: this.publishedAt,
@@ -92,7 +97,7 @@ class PodcastEpisode {
   }
 
   get audioTrack() {
-    var audioTrack = new AudioTrack()
+    const audioTrack = new AudioTrack()
     audioTrack.setData(this.libraryItemId, this.audioFile, 0)
     return audioTrack
   }
@@ -106,6 +111,10 @@ class PodcastEpisode {
   get enclosureUrl() {
     return this.enclosure ? this.enclosure.url : null
   }
+  get pubYear() {
+    if (!this.publishedAt) return null
+    return new Date(this.publishedAt).getFullYear()
+  }
 
   setData(data, index = 1) {
     this.id = getId('ep')
@@ -117,7 +126,7 @@ class PodcastEpisode {
     this.enclosure = data.enclosure ? { ...data.enclosure } : null
     this.season = data.season || ''
     this.episode = data.episode || ''
-    this.episodeType = data.episodeType || ''
+    this.episodeType = data.episodeType || 'full'
     this.publishedAt = data.publishedAt || 0
     this.addedAt = Date.now()
     this.updatedAt = Date.now()
@@ -128,15 +137,19 @@ class PodcastEpisode {
     this.audioFile = audioFile
     this.title = Path.basename(audioFile.metadata.filename, Path.extname(audioFile.metadata.filename))
     this.index = index
+
+    this.setDataFromAudioMetaTags(audioFile.metaTags, true)
+
+    this.chapters = audioFile.chapters?.map((c) => ({ ...c }))
     this.addedAt = Date.now()
     this.updatedAt = Date.now()
   }
 
   update(payload) {
-    var hasUpdates = false
+    let hasUpdates = false
     for (const key in this.toJSON()) {
-      if (payload[key] != undefined && payload[key] != this[key]) {
-        this[key] = payload[key]
+      if (payload[key] != undefined && !areEquivalent(payload[key], this[key])) {
+        this[key] = copyValue(payload[key])
         hasUpdates = true
       }
     }
@@ -148,7 +161,7 @@ class PodcastEpisode {
 
   // Only checks container format
   checkCanDirectPlay(payload) {
-    var supportedMimeTypes = payload.supportedMimeTypes || []
+    const supportedMimeTypes = payload.supportedMimeTypes || []
     return supportedMimeTypes.includes(this.audioFile.mimeType)
   }
 
@@ -159,6 +172,81 @@ class PodcastEpisode {
   checkEqualsEnclosureUrl(url) {
     if (!this.enclosure || !this.enclosure.url) return false
     return this.enclosure.url == url
+  }
+
+  searchQuery(query) {
+    return cleanStringForSearch(this.title).includes(query)
+  }
+
+  setDataFromAudioMetaTags(audioFileMetaTags, overrideExistingDetails = false) {
+    if (!audioFileMetaTags) return false
+
+    const MetadataMapArray = [
+      {
+        tag: 'tagComment',
+        altTag: 'tagSubtitle',
+        key: 'description'
+      },
+      {
+        tag: 'tagSubtitle',
+        key: 'subtitle'
+      },
+      {
+        tag: 'tagDate',
+        key: 'pubDate'
+      },
+      {
+        tag: 'tagDisc',
+        key: 'season',
+      },
+      {
+        tag: 'tagTrack',
+        altTag: 'tagSeriesPart',
+        key: 'episode'
+      },
+      {
+        tag: 'tagTitle',
+        key: 'title'
+      },
+      {
+        tag: 'tagEpisodeType',
+        key: 'episodeType'
+      }
+    ]
+
+    MetadataMapArray.forEach((mapping) => {
+      let value = audioFileMetaTags[mapping.tag]
+      let tagToUse = mapping.tag
+      if (!value && mapping.altTag) {
+        tagToUse = mapping.altTag
+        value = audioFileMetaTags[mapping.altTag]
+      }
+
+      if (value && typeof value === 'string') {
+        value = value.trim() // Trim whitespace
+
+        if (mapping.key === 'pubDate' && (!this.pubDate || overrideExistingDetails)) {
+          const pubJsDate = new Date(value)
+          if (pubJsDate && !isNaN(pubJsDate)) {
+            this.publishedAt = pubJsDate.valueOf()
+            this.pubDate = value
+            Logger.debug(`[PodcastEpisode] Mapping metadata to key ${tagToUse} => ${mapping.key}: ${this[mapping.key]}`)
+          } else {
+            Logger.warn(`[PodcastEpisode] Mapping pubDate with tag ${tagToUse} has invalid date "${value}"`)
+          }
+        } else if (mapping.key === 'episodeType' && (!this.episodeType || overrideExistingDetails)) {
+          if (['full', 'trailer', 'bonus'].includes(value)) {
+            this.episodeType = value
+            Logger.debug(`[PodcastEpisode] Mapping metadata to key ${tagToUse} => ${mapping.key}: ${this[mapping.key]}`)
+          } else {
+            Logger.warn(`[PodcastEpisode] Mapping episodeType with invalid value "${value}". Must be one of [full, trailer, bonus].`)
+          }
+        } else if (!this[mapping.key] || overrideExistingDetails) {
+          this[mapping.key] = value
+          Logger.debug(`[PodcastEpisode] Mapping metadata to key ${tagToUse} => ${mapping.key}: ${this[mapping.key]}`)
+        }
+      }
+    })
   }
 }
 module.exports = PodcastEpisode

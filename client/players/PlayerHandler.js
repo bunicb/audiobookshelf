@@ -17,13 +17,13 @@ export default class PlayerHandler {
     this.playerState = 'IDLE'
     this.isHlsTranscode = false
     this.isVideo = false
+    this.isMusic = false
     this.currentSessionId = null
     this.startTimeOverride = undefined // Used for starting playback at a specific time (i.e. clicking bookmark from library item page)
     this.startTime = 0
 
     this.failedProgressSyncs = 0
     this.lastSyncTime = 0
-    this.lastSyncedAt = 0
     this.listeningTimeSinceSync = 0
 
     this.playInterval = null
@@ -54,10 +54,13 @@ export default class PlayerHandler {
 
   load(libraryItem, episodeId, playWhenReady, playbackRate, startTimeOverride = undefined) {
     this.libraryItem = libraryItem
+    this.isVideo = libraryItem.mediaType === 'video'
+    this.isMusic = libraryItem.mediaType === 'music'
+
     this.episodeId = episodeId
     this.playWhenReady = playWhenReady
-    this.initialPlaybackRate = playbackRate
-    this.isVideo = libraryItem.mediaType === 'video'
+    this.initialPlaybackRate = this.isMusic ? 1 : playbackRate
+
     this.startTimeOverride = (startTimeOverride == null || isNaN(startTimeOverride)) ? undefined : Number(startTimeOverride)
 
     if (!this.player) this.switchPlayer(playWhenReady)
@@ -119,7 +122,7 @@ export default class PlayerHandler {
 
   playerError() {
     // Switch to HLS stream on error
-    if (!this.isCasting && !this.currentStreamId && (this.player instanceof LocalAudioPlayer)) {
+    if (!this.isCasting && (this.player instanceof LocalAudioPlayer)) {
       console.log(`[PlayerHandler] Audio player error switching to HLS stream`)
       this.prepare(true)
     }
@@ -140,12 +143,14 @@ export default class PlayerHandler {
   playerStateChange(state) {
     console.log('[PlayerHandler] Player state change', state)
     this.playerState = state
+
     if (this.playerState === 'PLAYING') {
       this.setPlaybackRate(this.initialPlaybackRate)
       this.startPlayInterval()
     } else {
       this.stopPlayInterval()
     }
+
     if (this.player) {
       if (this.playerState === 'LOADED' || this.playerState === 'PLAYING') {
         this.ctx.setDuration(this.getDuration())
@@ -167,16 +172,30 @@ export default class PlayerHandler {
     this.ctx.setBufferTime(buffertime)
   }
 
+  getDeviceId() {
+    let deviceId = localStorage.getItem('absDeviceId')
+    if (!deviceId) {
+      deviceId = this.ctx.$randomId()
+      localStorage.setItem('absDeviceId', deviceId)
+    }
+    return deviceId
+  }
+
   async prepare(forceTranscode = false) {
-    var payload = {
+    this.currentSessionId = null // Reset session
+
+    const payload = {
+      deviceInfo: {
+        deviceId: this.getDeviceId()
+      },
       supportedMimeTypes: this.player.playableMimeTypes,
       mediaPlayer: this.isCasting ? 'chromecast' : 'html5',
       forceTranscode,
       forceDirectPlay: this.isCasting || this.isVideo // TODO: add transcode support for chromecast
     }
 
-    var path = this.episodeId ? `/api/items/${this.libraryItem.id}/play/${this.episodeId}` : `/api/items/${this.libraryItem.id}/play`
-    var session = await this.ctx.$axios.$post(path, payload).catch((error) => {
+    const path = this.episodeId ? `/api/items/${this.libraryItem.id}/play/${this.episodeId}` : `/api/items/${this.libraryItem.id}/play`
+    const session = await this.ctx.$axios.$post(path, payload).catch((error) => {
       console.error('Failed to start stream', error)
     })
     this.prepareSession(session)
@@ -190,6 +209,8 @@ export default class PlayerHandler {
     this.playWhenReady = false
     this.initialPlaybackRate = playbackRate
     this.startTimeOverride = undefined
+    this.lastSyncTime = 0
+    this.listeningTimeSinceSync = 0
 
     this.prepareSession(session)
   }
@@ -232,12 +253,17 @@ export default class PlayerHandler {
   closePlayer() {
     console.log('[PlayerHandler] Close Player')
     this.sendCloseSession()
+    this.resetPlayer()
+  }
+
+  resetPlayer() {
     if (this.player) {
       this.player.destroy()
     }
     this.player = null
     this.playerState = 'IDLE'
     this.libraryItem = null
+    this.currentSessionId = null
     this.startTime = 0
     this.stopPlayInterval()
   }
@@ -252,49 +278,57 @@ export default class PlayerHandler {
 
   startPlayInterval() {
     clearInterval(this.playInterval)
-    var lastTick = Date.now()
+    let lastTick = Date.now()
     this.playInterval = setInterval(() => {
       // Update UI
       if (!this.player) return
-      var currentTime = this.player.getCurrentTime()
+      const currentTime = this.player.getCurrentTime()
       this.ctx.setCurrentTime(currentTime)
 
-      var exactTimeElapsed = ((Date.now() - lastTick) / 1000)
+      const exactTimeElapsed = ((Date.now() - lastTick) / 1000)
       lastTick = Date.now()
       this.listeningTimeSinceSync += exactTimeElapsed
-      if (this.listeningTimeSinceSync >= 5) {
+      const TimeToWaitBeforeSync = this.lastSyncTime > 0 ? 5 : 20
+      if (this.listeningTimeSinceSync >= TimeToWaitBeforeSync) {
         this.sendProgressSync(currentTime)
       }
     }, 1000)
   }
 
   sendCloseSession() {
-    var syncData = null
+    let syncData = null
     if (this.player) {
-      var listeningTimeToAdd = Math.max(0, Math.floor(this.listeningTimeSinceSync))
-      syncData = {
-        timeListened: listeningTimeToAdd,
-        duration: this.getDuration(),
-        currentTime: this.getCurrentTime()
+      const listeningTimeToAdd = Math.max(0, Math.floor(this.listeningTimeSinceSync))
+      // When opening player and quickly closing dont save progress
+      if (listeningTimeToAdd > 20 || this.lastSyncTime > 0) {
+        syncData = {
+          timeListened: listeningTimeToAdd,
+          duration: this.getDuration(),
+          currentTime: this.getCurrentTime()
+        }
       }
     }
     this.listeningTimeSinceSync = 0
+    this.lastSyncTime = 0
     return this.ctx.$axios.$post(`/api/session/${this.currentSessionId}/close`, syncData, { timeout: 1000 }).catch((error) => {
       console.error('Failed to close session', error)
     })
   }
 
   sendProgressSync(currentTime) {
-    var diffSinceLastSync = Math.abs(this.lastSyncTime - currentTime)
+    if (this.isMusic) return
+
+    const diffSinceLastSync = Math.abs(this.lastSyncTime - currentTime)
     if (diffSinceLastSync < 1) return
 
     this.lastSyncTime = currentTime
-    var listeningTimeToAdd = Math.max(0, Math.floor(this.listeningTimeSinceSync))
-    var syncData = {
+    const listeningTimeToAdd = Math.max(0, Math.floor(this.listeningTimeSinceSync))
+    const syncData = {
       timeListened: listeningTimeToAdd,
       duration: this.getDuration(),
       currentTime
     }
+
     this.listeningTimeSinceSync = 0
     this.ctx.$axios.$post(`/api/session/${this.currentSessionId}/sync`, syncData, { timeout: 3000 }).then(() => {
       this.failedProgressSyncs = 0

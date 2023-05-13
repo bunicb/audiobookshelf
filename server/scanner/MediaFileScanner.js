@@ -14,7 +14,7 @@ class MediaFileScanner {
   getTrackAndDiscNumberFromFilename(mediaMetadataFromScan, audioLibraryFile) {
     const { title, author, series, publishedYear } = mediaMetadataFromScan
     const { filename, path } = audioLibraryFile.metadata
-    var partbasename = Path.basename(filename, Path.extname(filename))
+    let partbasename = Path.basename(filename, Path.extname(filename))
 
     // Remove title, author, series, and publishedYear from filename if there
     if (title) partbasename = partbasename.replace(title, '')
@@ -23,8 +23,8 @@ class MediaFileScanner {
     if (publishedYear) partbasename = partbasename.replace(publishedYear)
 
     // Look for disc number
-    var discNumber = null
-    var discMatch = partbasename.match(/\b(disc|cd) ?(\d\d?)\b/i)
+    let discNumber = null
+    const discMatch = partbasename.match(/\b(disc|cd) ?(\d\d?)\b/i)
     if (discMatch && discMatch.length > 2 && discMatch[2]) {
       if (!isNaN(discMatch[2])) {
         discNumber = Number(discMatch[2])
@@ -35,14 +35,14 @@ class MediaFileScanner {
     }
 
     // Look for disc number in folder path e.g. /Book Title/CD01/audiofile.mp3
-    var pathdir = Path.dirname(path).split('/').pop()
+    const pathdir = Path.dirname(path).split('/').pop()
     if (pathdir && /^cd\d{1,3}$/i.test(pathdir)) {
-      var discFromFolder = Number(pathdir.replace(/cd/i, ''))
+      const discFromFolder = Number(pathdir.replace(/cd/i, ''))
       if (!isNaN(discFromFolder) && discFromFolder !== null) discNumber = discFromFolder
     }
 
-    var numbersinpath = partbasename.match(/\d{1,4}/g)
-    var trackNumber = numbersinpath && numbersinpath.length ? parseInt(numbersinpath[0]) : null
+    const numbersinpath = partbasename.match(/\d{1,4}/g)
+    const trackNumber = numbersinpath && numbersinpath.length ? parseInt(numbersinpath[0]) : null
     return {
       trackNumber,
       discNumber
@@ -51,15 +51,15 @@ class MediaFileScanner {
 
   getAverageScanDurationMs(results) {
     if (!results.length) return 0
-    var total = 0
+    let total = 0
     for (let i = 0; i < results.length; i++) total += results[i].elapsed
     return Math.floor(total / results.length)
   }
 
   async scan(mediaType, libraryFile, mediaMetadataFromScan, verbose = false) {
-    var probeStart = Date.now()
+    const probeStart = Date.now()
 
-    var probeData = null
+    let probeData = null
     // TODO: Temp not using tone for probing until more testing can be done
     // if (global.ServerSettings.scannerUseTone) {
     //   Logger.debug(`[MediaFileScanner] using tone to probe audio file "${libraryFile.metadata.path}"`)
@@ -79,7 +79,7 @@ class MediaFileScanner {
         return null
       }
 
-      var videoFile = new VideoFile()
+      const videoFile = new VideoFile()
       videoFile.setDataFromProbe(libraryFile, probeData)
 
       return {
@@ -92,9 +92,9 @@ class MediaFileScanner {
         return null
       }
 
-      var audioFile = new AudioFile()
-      audioFile.trackNumFromMeta = probeData.trackNumber
-      audioFile.discNumFromMeta = probeData.discNumber
+      const audioFile = new AudioFile()
+      audioFile.trackNumFromMeta = probeData.audioMetaTags.trackNumber
+      audioFile.discNumFromMeta = probeData.audioMetaTags.discNumber
       if (mediaType === 'book') {
         const { trackNumber, discNumber } = this.getTrackAndDiscNumberFromFilename(mediaMetadataFromScan, libraryFile)
         audioFile.trackNumFromFilename = trackNumber
@@ -110,16 +110,21 @@ class MediaFileScanner {
   }
 
   // Returns array of { MediaFile, elapsed, averageScanDuration } from audio file scan objects
-  async executeMediaFileScans(libraryItem, mediaLibraryFiles, scanData) {
+  async executeMediaFileScans(libraryItem, mediaLibraryFiles) {
     const mediaType = libraryItem.mediaType
 
-    var scanStart = Date.now()
-    var mediaMetadataFromScan = scanData.media.metadata || null
-    var proms = []
-    for (let i = 0; i < mediaLibraryFiles.length; i++) {
-      proms.push(this.scan(mediaType, mediaLibraryFiles[i], mediaMetadataFromScan))
+    const scanStart = Date.now()
+    const mediaMetadata = libraryItem.media.metadata || null
+    const batchSize = 32
+    const results = []
+    for (let batch = 0; batch < mediaLibraryFiles.length; batch += batchSize) {
+      const proms = []
+      for (let i = batch; i < Math.min(batch + batchSize, mediaLibraryFiles.length); i++) {
+        proms.push(this.scan(mediaType, mediaLibraryFiles[i], mediaMetadata))
+      }
+      results.push(...await Promise.all(proms).then((scanResults) => scanResults.filter(sr => sr)))
     }
-    var results = await Promise.all(proms).then((scanResults) => scanResults.filter(sr => sr))
+
     return {
       audioFiles: results.filter(r => r.audioFile).map(r => r.audioFile),
       videoFiles: results.filter(r => r.videoFile).map(r => r.videoFile),
@@ -131,7 +136,7 @@ class MediaFileScanner {
   isSequential(nums) {
     if (!nums || !nums.length) return false
     if (nums.length === 1) return true
-    var prev = nums[0]
+    let prev = nums[0]
     for (let i = 1; i < nums.length; i++) {
       if (nums[i] - prev > 1) return false
       prev = nums[i]
@@ -206,10 +211,20 @@ class MediaFileScanner {
     }
   }
 
-  async scanMediaFiles(mediaLibraryFiles, scanData, libraryItem, preferAudioMetadata, preferOverdriveMediaMarker, libraryScan = null) {
-    var hasUpdated = false
+  /**
+  * Scans media files for a library item and adds them as audio tracks and sets library item metadata
+  * @async
+  * @param {Array<LibraryFile>} mediaLibraryFiles - Media files for this library item
+  * @param {LibraryItem} libraryItem
+  * @param {LibraryScan} [libraryScan=null] - Optional when doing a library scan to use LibraryScan config/logs
+  * @return {Promise<Boolean>} True if any updates were made
+  */
+  async scanMediaFiles(mediaLibraryFiles, libraryItem, libraryScan = null) {
+    const preferAudioMetadata = libraryScan ? !!libraryScan.preferAudioMetadata : !!global.ServerSettings.scannerPreferAudioMetadata
 
-    var mediaScanResult = await this.executeMediaFileScans(libraryItem, mediaLibraryFiles, scanData)
+    let hasUpdated = false
+
+    const mediaScanResult = await this.executeMediaFileScans(libraryItem, mediaLibraryFiles)
 
     if (libraryItem.mediaType === 'video') {
       if (mediaScanResult.videoFiles.length) {
@@ -219,36 +234,36 @@ class MediaFileScanner {
       }
     } else if (mediaScanResult.audioFiles.length) {
       if (libraryScan) {
-        libraryScan.addLog(LogLevel.DEBUG, `Library Item "${scanData.path}" Media file scan took ${mediaScanResult.elapsed}ms for ${mediaScanResult.audioFiles.length} with average time of ${mediaScanResult.averageScanDuration}ms per MB`)
+        libraryScan.addLog(LogLevel.DEBUG, `Library Item "${libraryItem.path}" Media file scan took ${mediaScanResult.elapsed}ms for ${mediaScanResult.audioFiles.length} with average time of ${mediaScanResult.averageScanDuration}ms per MB`)
       }
-      Logger.debug(`Library Item "${scanData.path}" Media file scan took ${mediaScanResult.elapsed}ms with ${mediaScanResult.audioFiles.length} audio files averaging ${mediaScanResult.averageScanDuration}ms per MB`)
+      Logger.debug(`Library Item "${libraryItem.path}" Media file scan took ${mediaScanResult.elapsed}ms with ${mediaScanResult.audioFiles.length} audio files averaging ${mediaScanResult.averageScanDuration}ms per MB`)
 
-      var newAudioFiles = mediaScanResult.audioFiles.filter(af => {
+      const newAudioFiles = mediaScanResult.audioFiles.filter(af => {
         return !libraryItem.media.findFileWithInode(af.ino)
       })
 
       // Book: Adding audio files to book media
       if (libraryItem.mediaType === 'book') {
-        var mediaScanFileInodes = mediaScanResult.audioFiles.map(af => af.ino)
+        const mediaScanFileInodes = mediaScanResult.audioFiles.map(af => af.ino)
         // Filter for existing valid track audio files not included in the audio files scanned
-        var existingAudioFiles = libraryItem.media.audioFiles.filter(af => af.isValidTrack && !mediaScanFileInodes.includes(af.ino))
+        const existingAudioFiles = libraryItem.media.audioFiles.filter(af => af.isValidTrack && !mediaScanFileInodes.includes(af.ino))
 
         if (newAudioFiles.length) {
           // Single Track Audiobooks
           if (mediaScanFileInodes.length + existingAudioFiles.length === 1) {
-            var af = mediaScanResult.audioFiles[0]
+            const af = mediaScanResult.audioFiles[0]
             af.index = 1
             libraryItem.media.addAudioFile(af)
             hasUpdated = true
           } else {
-            var allAudioFiles = existingAudioFiles.concat(mediaScanResult.audioFiles)
+            const allAudioFiles = existingAudioFiles.concat(mediaScanResult.audioFiles)
             this.runSmartTrackOrder(libraryItem, allAudioFiles)
             hasUpdated = true
           }
         } else {
           // Only update metadata not index
           mediaScanResult.audioFiles.forEach((af) => {
-            var existingAF = libraryItem.media.findFileWithInode(af.ino)
+            const existingAF = libraryItem.media.findFileWithInode(af.ino)
             if (existingAF) {
               af.index = existingAF.index
               if (existingAF.updateFromScan && existingAF.updateFromScan(af)) {
@@ -264,13 +279,13 @@ class MediaFileScanner {
         }
 
         if (hasUpdated) {
-          libraryItem.media.rebuildTracks(preferOverdriveMediaMarker)
+          libraryItem.media.rebuildTracks()
         }
-      } else { // Podcast Media Type
-        var existingAudioFiles = mediaScanResult.audioFiles.filter(af => libraryItem.media.findFileWithInode(af.ino))
+      } else if (libraryItem.mediaType === 'podcast') { // Podcast Media Type
+        const existingAudioFiles = mediaScanResult.audioFiles.filter(af => libraryItem.media.findFileWithInode(af.ino))
 
         if (newAudioFiles.length) {
-          var newIndex = libraryItem.media.episodes.length + 1
+          let newIndex = libraryItem.media.episodes.length + 1
           newAudioFiles.forEach((newAudioFile) => {
             libraryItem.media.addNewEpisodeFromAudioFile(newAudioFile, newIndex++)
           })
@@ -280,11 +295,37 @@ class MediaFileScanner {
 
         // Update audio file metadata for audio files already there
         existingAudioFiles.forEach((af) => {
-          var peAudioFile = libraryItem.media.findFileWithInode(af.ino)
-          if (peAudioFile.updateFromScan && peAudioFile.updateFromScan(af)) {
+          const podcastEpisode = libraryItem.media.findEpisodeWithInode(af.ino)
+          if (podcastEpisode?.audioFile.updateFromScan(af)) {
             hasUpdated = true
+
+            podcastEpisode.setDataFromAudioMetaTags(podcastEpisode.audioFile.metaTags, false)
           }
         })
+
+        if (libraryItem.media.setMetadataFromAudioFile(preferAudioMetadata)) {
+          hasUpdated = true
+        }
+      } else if (libraryItem.mediaType === 'music') { // Music
+        // Only one audio file in library item
+        if (newAudioFiles.length) { // New audio file
+          libraryItem.media.setAudioFile(newAudioFiles[0])
+          hasUpdated = true
+        } else if (libraryItem.media.audioFile && libraryItem.media.audioFile.updateFromScan(mediaScanResult.audioFiles[0])) {
+          hasUpdated = true
+          console.log('Updated from scan')
+        }
+
+        if (libraryItem.media.setMetadataFromAudioFile()) {
+          hasUpdated = true
+        }
+
+        // If the audio track has no title meta tag then use the audio file name
+        if (!libraryItem.media.metadata.title && libraryItem.media.audioFile) {
+          const audioFileName = libraryItem.media.audioFile.metadata.filename
+          libraryItem.media.metadata.title = Path.basename(audioFileName, Path.extname(audioFileName))
+          hasUpdated = true
+        }
       }
     }
 

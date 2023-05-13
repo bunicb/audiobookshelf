@@ -5,7 +5,7 @@ const { areEquivalent, copyValue, cleanStringForSearch } = require('../../utils/
 const { parseOpfMetadataXML } = require('../../utils/parsers/parseOpfMetadata')
 const { parseOverdriveMediaMarkersAsChapters } = require('../../utils/parsers/parseOverdriveMediaMarkers')
 const abmetadataGenerator = require('../../utils/abmetadataGenerator')
-const { readTextFile } = require('../../utils/fileUtils')
+const { readTextFile, filePathToPOSIX } = require('../../utils/fileUtils')
 const AudioFile = require('../files/AudioFile')
 const AudioTrack = require('../files/AudioTrack')
 const EBookFile = require('../files/EBookFile')
@@ -118,16 +118,16 @@ class Book {
     return this.missingParts.length || this.invalidAudioFiles.length
   }
   get tracks() {
-    var startOffset = 0
+    let startOffset = 0
     return this.includedAudioFiles.map((af) => {
-      var audioTrack = new AudioTrack()
+      const audioTrack = new AudioTrack()
       audioTrack.setData(this.libraryItemId, af, startOffset)
       startOffset += audioTrack.duration
       return audioTrack
     })
   }
   get duration() {
-    var total = 0
+    let total = 0
     this.tracks.forEach((track) => total += track.duration)
     return total
   }
@@ -136,11 +136,11 @@ class Book {
   }
 
   update(payload) {
-    var json = this.toJSON()
+    const json = this.toJSON()
     delete json.audiobooks // do not update media entities here
     delete json.ebooks
 
-    var hasUpdates = false
+    let hasUpdates = false
     for (const key in json) {
       if (payload[key] !== undefined) {
         if (key === 'metadata') {
@@ -182,7 +182,7 @@ class Book {
   }
 
   updateCover(coverPath) {
-    coverPath = coverPath.replace(/\\/g, '/')
+    coverPath = filePathToPOSIX(coverPath)
     if (this.coverPath === coverPath) return false
     this.coverPath = coverPath
     return true
@@ -228,45 +228,52 @@ class Book {
 
   // Look for desc.txt, reader.txt, metadata.abs and opf file then update details if found
   async syncMetadataFiles(textMetadataFiles, opfMetadataOverrideDetails) {
-    var metadataUpdatePayload = {}
-    var tagsUpdated = false
+    let metadataUpdatePayload = {}
+    let tagsUpdated = false
 
-    var descTxt = textMetadataFiles.find(lf => lf.metadata.filename === 'desc.txt')
+    const descTxt = textMetadataFiles.find(lf => lf.metadata.filename === 'desc.txt')
     if (descTxt) {
-      var descriptionText = await readTextFile(descTxt.metadata.path)
+      const descriptionText = await readTextFile(descTxt.metadata.path)
       if (descriptionText) {
         Logger.debug(`[Book] "${this.metadata.title}" found desc.txt updating description with "${descriptionText.slice(0, 20)}..."`)
         metadataUpdatePayload.description = descriptionText
       }
     }
-    var readerTxt = textMetadataFiles.find(lf => lf.metadata.filename === 'reader.txt')
+    const readerTxt = textMetadataFiles.find(lf => lf.metadata.filename === 'reader.txt')
     if (readerTxt) {
-      var narratorText = await readTextFile(readerTxt.metadata.path)
+      const narratorText = await readTextFile(readerTxt.metadata.path)
       if (narratorText) {
         Logger.debug(`[Book] "${this.metadata.title}" found reader.txt updating narrator with "${narratorText}"`)
         metadataUpdatePayload.narrators = this.metadata.parseNarratorsTag(narratorText)
       }
     }
 
-    var metadataAbs = textMetadataFiles.find(lf => lf.metadata.filename === 'metadata.abs')
+    const metadataAbs = textMetadataFiles.find(lf => lf.metadata.filename === 'metadata.abs')
     if (metadataAbs) {
       Logger.debug(`[Book] Found metadata.abs file for "${this.metadata.title}"`)
-      var metadataText = await readTextFile(metadataAbs.metadata.path)
-      var abmetadataUpdates = abmetadataGenerator.parseAndCheckForUpdates(metadataText, this.metadata, 'book')
+      const metadataText = await readTextFile(metadataAbs.metadata.path)
+      const abmetadataUpdates = abmetadataGenerator.parseAndCheckForUpdates(metadataText, this, 'book')
       if (abmetadataUpdates && Object.keys(abmetadataUpdates).length) {
         Logger.debug(`[Book] "${this.metadata.title}" changes found in metadata.abs file`, abmetadataUpdates)
-        metadataUpdatePayload = {
-          ...metadataUpdatePayload,
-          ...abmetadataUpdates
+
+        if (abmetadataUpdates.tags) { // Set media tags if updated
+          this.tags = abmetadataUpdates.tags
+          tagsUpdated = true
+        }
+        if (abmetadataUpdates.metadata) {
+          metadataUpdatePayload = {
+            ...metadataUpdatePayload,
+            ...abmetadataUpdates.metadata
+          }
         }
       }
     }
 
-    var metadataOpf = textMetadataFiles.find(lf => lf.isOPFFile || lf.metadata.filename === 'metadata.xml')
+    const metadataOpf = textMetadataFiles.find(lf => lf.isOPFFile || lf.metadata.filename === 'metadata.xml')
     if (metadataOpf) {
-      var xmlText = await readTextFile(metadataOpf.metadata.path)
+      const xmlText = await readTextFile(metadataOpf.metadata.path)
       if (xmlText) {
-        var opfMetadata = await parseOpfMetadataXML(xmlText)
+        const opfMetadata = await parseOpfMetadataXML(xmlText)
         if (opfMetadata) {
           for (const key in opfMetadata) {
 
@@ -289,7 +296,7 @@ class Book {
                 })
               }
             } else if (key === 'narrators') {
-              if (opfMetadata.narrators && opfMetadata.narrators.length && (!this.metadata.narrators.length || opfMetadataOverrideDetails)) {
+              if (opfMetadata.narrators?.length && (!this.metadata.narrators.length || opfMetadataOverrideDetails)) {
                 metadataUpdatePayload.narrators = opfMetadata.narrators
               }
             } else if (key === 'series') {
@@ -311,14 +318,15 @@ class Book {
   }
 
   searchQuery(query) {
-    var payload = {
+    const payload = {
       tags: this.tags.filter(t => cleanStringForSearch(t).includes(query)),
       series: this.metadata.searchSeries(query),
       authors: this.metadata.searchAuthors(query),
+      narrators: this.metadata.searchNarrators(query),
       matchKey: null,
       matchText: null
     }
-    var metadataMatch = this.metadata.searchQuery(query)
+    const metadataMatch = this.metadata.searchQuery(query)
     if (metadataMatch) {
       payload.matchKey = metadataMatch.matchKey
       payload.matchText = metadataMatch.matchText
@@ -329,10 +337,12 @@ class Book {
       } else if (payload.series.length) {
         payload.matchKey = 'series'
         payload.matchText = this.metadata.seriesName
-      }
-      else if (payload.tags.length) {
+      } else if (payload.tags.length) {
         payload.matchKey = 'tags'
         payload.matchText = this.tags.join(', ')
+      } else if (payload.narrators.length) {
+        payload.matchKey = 'narrators'
+        payload.matchText = this.metadata.narratorName
       }
     }
     return payload
@@ -349,9 +359,9 @@ class Book {
   }
 
   updateAudioTracks(orderedFileData) {
-    var index = 1
+    let index = 1
     this.audioFiles = orderedFileData.map((fileData) => {
-      var audioFile = this.audioFiles.find(af => af.ino === fileData.ino)
+      const audioFile = this.audioFiles.find(af => af.ino === fileData.ino)
       audioFile.manuallyVerified = true
       audioFile.invalid = false
       audioFile.error = null
@@ -369,11 +379,11 @@ class Book {
     this.rebuildTracks()
   }
 
-  rebuildTracks(preferOverdriveMediaMarker) {
+  rebuildTracks() {
     Logger.debug(`[Book] Tracks being rebuilt...!`)
     this.audioFiles.sort((a, b) => a.index - b.index)
     this.missingParts = []
-    this.setChapters(preferOverdriveMediaMarker)
+    this.setChapters()
     this.checkUpdateMissingTracks()
   }
 
@@ -405,14 +415,16 @@ class Book {
     return wasUpdated
   }
 
-  setChapters(preferOverdriveMediaMarker = false) {
+  setChapters() {
+    const preferOverdriveMediaMarker = !!global.ServerSettings.scannerPreferOverdriveMediaMarker
+
     // If 1 audio file without chapters, then no chapters will be set
-    var includedAudioFiles = this.audioFiles.filter(af => !af.exclude)
+    const includedAudioFiles = this.audioFiles.filter(af => !af.exclude)
     if (!includedAudioFiles.length) return
 
     // If overdrive media markers are present and preferred, use those instead
     if (preferOverdriveMediaMarker) {
-      var overdriveChapters = parseOverdriveMediaMarkersAsChapters(includedAudioFiles)
+      const overdriveChapters = parseOverdriveMediaMarkersAsChapters(includedAudioFiles)
       if (overdriveChapters) {
         Logger.info('[Book] Overdrive Media Markers and preference found! Using these for chapter definitions')
         this.chapters = overdriveChapters
@@ -420,22 +432,59 @@ class Book {
       }
     }
 
-    // IF first audio file has embedded chapters then use embedded chapters
-    if (includedAudioFiles[0].chapters && includedAudioFiles[0].chapters.length) {
-      Logger.debug(`[Book] setChapters: Using embedded chapters in audio file ${includedAudioFiles[0].metadata.path}`)
-      this.chapters = includedAudioFiles[0].chapters.map(c => ({ ...c }))
+    // If first audio file has embedded chapters then use embedded chapters
+    if (includedAudioFiles[0].chapters?.length) {
+      // If all files chapters are the same, then only make chapters for the first file
+      if (
+        includedAudioFiles.length === 1 ||
+        includedAudioFiles.length > 1 &&
+        includedAudioFiles[0].chapters.length === includedAudioFiles[1].chapters?.length &&
+        includedAudioFiles[0].chapters.every((c, i) => c.title === includedAudioFiles[1].chapters[i].title)
+      ) {
+        Logger.debug(`[Book] setChapters: Using embedded chapters in first audio file ${includedAudioFiles[0].metadata?.path}`)
+        this.chapters = includedAudioFiles[0].chapters.map((c) => ({ ...c }))
+      } else {
+        Logger.debug(`[Book] setChapters: Using embedded chapters from all audio files ${includedAudioFiles[0].metadata?.path}`)
+        this.chapters = []
+        let currChapterId = 0
+        let currStartTime = 0
+
+        includedAudioFiles.forEach((file) => {
+          if (file.duration) {
+            const chapters = file.chapters?.map((c) => ({
+              ...c,
+              id: c.id + currChapterId,
+              start: c.start + currStartTime,
+              end: c.end + currStartTime,
+            })) ?? []
+            this.chapters = this.chapters.concat(chapters)
+
+            currChapterId += file.chapters?.length ?? 0
+            currStartTime += file.duration
+          }
+        })
+      }
     } else if (includedAudioFiles.length > 1) {
+      const preferAudioMetadata = !!global.ServerSettings.scannerPreferAudioMetadata
+
       // Build chapters from audio files
       this.chapters = []
-      var currChapterId = 0
-      var currStartTime = 0
+      let currChapterId = 0
+      let currStartTime = 0
       includedAudioFiles.forEach((file) => {
         if (file.duration) {
+          let title = file.metadata.filename ? Path.basename(file.metadata.filename, Path.extname(file.metadata.filename)) : `Chapter ${currChapterId}`
+
+          // When prefer audio metadata server setting is set then use ID3 title tag as long as it is not the same as the book title
+          if (preferAudioMetadata && file.metaTags?.tagTitle && file.metaTags?.tagTitle !== this.metadata.title) {
+            title = file.metaTags.tagTitle
+          }
+
           this.chapters.push({
             id: currChapterId++,
             start: currStartTime,
             end: currStartTime + file.duration,
-            title: file.metadata.filename ? Path.basename(file.metadata.filename, Path.extname(file.metadata.filename)) : `Chapter ${currChapterId}`
+            title
           })
           currStartTime += file.duration
         }

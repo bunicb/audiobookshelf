@@ -10,14 +10,11 @@ const { writeConcatFile } = require('../utils/ffmpegHelpers')
 const toneHelpers = require('../utils/toneHelpers')
 
 class AbMergeManager {
-  constructor(db, taskManager, clientEmitter) {
+  constructor(db, taskManager) {
     this.db = db
     this.taskManager = taskManager
-    this.clientEmitter = clientEmitter
 
     this.itemsCacheDir = Path.join(global.MetadataPath, 'cache/items')
-    this.downloadDirPath = Path.join(global.MetadataPath, 'downloads')
-    this.downloadDirPathExist = false
 
     this.pendingTasks = []
   }
@@ -30,23 +27,7 @@ class AbMergeManager {
     return this.removeTask(task, true)
   }
 
-  async ensureDownloadDirPath() { // Creates download path if necessary and sets owner and permissions
-    if (this.downloadDirPathExist) return
-
-    var pathCreated = false
-    if (!(await fs.pathExists(this.downloadDirPath))) {
-      await fs.mkdir(this.downloadDirPath)
-      pathCreated = true
-    }
-
-    if (pathCreated) {
-      await filePerms.setDefault(this.downloadDirPath)
-    }
-
-    this.downloadDirPathExist = true
-  }
-
-  async startAudiobookMerge(user, libraryItem) {
+  async startAudiobookMerge(user, libraryItem, options = {}) {
     const task = new Task()
 
     const audiobookDirname = Path.basename(libraryItem.path)
@@ -73,20 +54,28 @@ class AbMergeManager {
       await fs.mkdir(taskData.itemCachePath)
     }
 
-    this.runAudiobookMerge(libraryItem, task)
+    this.runAudiobookMerge(libraryItem, task, options || {})
   }
 
-  async runAudiobookMerge(libraryItem, task) {
+  async runAudiobookMerge(libraryItem, task, encodingOptions) {
+    const audioBitrate = encodingOptions.bitrate || '64k'
+    const audioCodec = encodingOptions.codec || 'aac'
+    const audioChannels = encodingOptions.channels || 2
+
     // If changing audio file type then encoding is needed
-    var audioTracks = libraryItem.media.tracks
-    var audioRequiresEncode = audioTracks[0].metadata.ext !== '.m4b'
-    var firstTrackIsM4b = audioTracks[0].metadata.ext.toLowerCase() === '.m4b'
-    var isOneTrack = audioTracks.length === 1
+    const audioTracks = libraryItem.media.tracks
+
+    // TODO: Updated in 2.2.11 to always encode even if merging multiple m4b. This is because just using the file extension as was being done before is not enough. This can be an option or do more to check if a concat is possible.
+    // const audioRequiresEncode = audioTracks[0].metadata.ext !== '.m4b'
+    const audioRequiresEncode = true
+
+    const firstTrackIsM4b = audioTracks[0].metadata.ext.toLowerCase() === '.m4b'
+    const isOneTrack = audioTracks.length === 1
 
     const ffmpegInputs = []
 
     if (!isOneTrack) {
-      var concatFilePath = Path.join(task.data.itemCachePath, 'files.txt')
+      const concatFilePath = Path.join(task.data.itemCachePath, 'files.txt')
       await writeConcatFile(audioTracks, concatFilePath)
       ffmpegInputs.push({
         input: concatFilePath,
@@ -100,15 +89,15 @@ class AbMergeManager {
     }
 
     const logLevel = process.env.NODE_ENV === 'production' ? 'error' : 'warning'
-    var ffmpegOptions = [`-loglevel ${logLevel}`]
-    var ffmpegOutputOptions = ['-f mp4']
+    let ffmpegOptions = [`-loglevel ${logLevel}`]
+    const ffmpegOutputOptions = ['-f mp4']
 
     if (audioRequiresEncode) {
       ffmpegOptions = ffmpegOptions.concat([
         '-map 0:a',
-        '-acodec aac',
-        '-ac 2',
-        '-b:a 64k'
+        `-acodec ${audioCodec}`,
+        `-ac ${audioChannels}`,
+        `-b:a ${audioBitrate}`
       ])
     } else {
       ffmpegOptions.push('-max_muxing_queue_size 1000')
@@ -120,7 +109,7 @@ class AbMergeManager {
       }
     }
 
-    var toneJsonPath = null
+    let toneJsonPath = null
     try {
       toneJsonPath = Path.join(task.data.itemCachePath, 'metadata.json')
       await toneHelpers.writeToneMetadataJsonFile(libraryItem, libraryItem.media.chapters, toneJsonPath, 1)
@@ -134,16 +123,20 @@ class AbMergeManager {
       'TrackNumber': 1,
     }
 
-    var workerData = {
+    if (libraryItem.media.coverPath) {
+      task.data.toneJsonObject['CoverFile'] = libraryItem.media.coverPath
+    }
+
+    const workerData = {
       inputs: ffmpegInputs,
       options: ffmpegOptions,
       outputOptions: ffmpegOutputOptions,
       output: task.data.tempFilepath
     }
 
-    var worker = null
+    let worker = null
     try {
-      var workerPath = Path.join(global.appRoot, 'server/utils/downloadWorker.js')
+      const workerPath = Path.join(global.appRoot, 'server/utils/downloadWorker.js')
       worker = new workerThreads.Worker(workerPath, { workerData })
     } catch (error) {
       Logger.error(`[AbMergeManager] Start worker thread failed`, error)
@@ -224,14 +217,16 @@ class AbMergeManager {
     const pendingDl = this.pendingTasks.find(d => d.id === task.id)
     if (pendingDl) {
       this.pendingTasks = this.pendingTasks.filter(d => d.id !== task.id)
-      Logger.warn(`[AbMergeManager] Removing download in progress - stopping worker`)
       if (pendingDl.worker) {
+        Logger.warn(`[AbMergeManager] Removing download in progress - stopping worker`)
         try {
           pendingDl.worker.postMessage('STOP')
           return
         } catch (error) {
           Logger.error('[AbMergeManager] Error posting stop message to worker', error)
         }
+      } else {
+        Logger.debug(`[AbMergeManager] Removing download in progress - no worker`)
       }
     }
 

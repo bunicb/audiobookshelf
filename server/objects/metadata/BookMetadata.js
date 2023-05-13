@@ -17,6 +17,7 @@ class BookMetadata {
     this.asin = null
     this.language = null
     this.explicit = false
+    this.abridged = false
 
     if (metadata) {
       this.construct(metadata)
@@ -26,9 +27,9 @@ class BookMetadata {
   construct(metadata) {
     this.title = metadata.title
     this.subtitle = metadata.subtitle
-    this.authors = (metadata.authors && metadata.authors.map) ? metadata.authors.map(a => ({ ...a })) : []
-    this.narrators = metadata.narrators ? [...metadata.narrators] : []
-    this.series = (metadata.series && metadata.series.map) ? metadata.series.map(s => ({ ...s })) : []
+    this.authors = (metadata.authors?.map) ? metadata.authors.map(a => ({ ...a })) : []
+    this.narrators = metadata.narrators ? [...metadata.narrators].filter(n => n) : []
+    this.series = (metadata.series?.map) ? metadata.series.map(s => ({ ...s })) : []
     this.genres = metadata.genres ? [...metadata.genres] : []
     this.publishedYear = metadata.publishedYear || null
     this.publishedDate = metadata.publishedDate || null
@@ -38,6 +39,7 @@ class BookMetadata {
     this.asin = metadata.asin
     this.language = metadata.language
     this.explicit = !!metadata.explicit
+    this.abridged = !!metadata.abridged
   }
 
   toJSON() {
@@ -55,7 +57,8 @@ class BookMetadata {
       isbn: this.isbn,
       asin: this.asin,
       language: this.language,
-      explicit: this.explicit
+      explicit: this.explicit,
+      abridged: this.abridged
     }
   }
 
@@ -76,7 +79,8 @@ class BookMetadata {
       isbn: this.isbn,
       asin: this.asin,
       language: this.language,
-      explicit: this.explicit
+      explicit: this.explicit,
+      abridged: this.abridged
     }
   }
 
@@ -100,7 +104,8 @@ class BookMetadata {
       authorName: this.authorName,
       authorNameLF: this.authorNameLF,
       narratorName: this.narratorName,
-      seriesName: this.seriesName
+      seriesName: this.seriesName,
+      abridged: this.abridged
     }
   }
 
@@ -175,7 +180,7 @@ class BookMetadata {
     return this.series.length ? this.series[0] : null
   }
   getSeriesSequence(seriesId) {
-    var series = this.series.find(se => se.id == seriesId)
+    const series = this.series.find(se => se.id == seriesId)
     if (!series) return null
     return series.sequence || ''
   }
@@ -214,6 +219,32 @@ class BookMetadata {
       id: newAuthor.id,
       name: newAuthor.name
     })
+  }
+
+  /**
+   * Update narrator name if narrator is in book
+   * @param {String} oldNarratorName - Narrator name to get updated
+   * @param {String} newNarratorName - Updated narrator name
+   * @return {Boolean} True if narrator was updated
+   */
+  updateNarrator(oldNarratorName, newNarratorName) {
+    if (!this.hasNarrator(oldNarratorName)) return false
+    this.narrators = this.narrators.filter(n => n !== oldNarratorName)
+    if (newNarratorName && !this.hasNarrator(newNarratorName)) {
+      this.narrators.push(newNarratorName)
+    }
+    return true
+  }
+
+  /**
+   * Remove narrator name if narrator is in book
+   * @param {String} narratorName - Narrator name to remove
+   * @return {Boolean} True if narrator was updated
+   */
+  removeNarrator(narratorName) {
+    if (!this.hasNarrator(narratorName)) return false
+    this.narrators = this.narrators.filter(n => n !== narratorName)
+    return true
   }
 
   setData(scanMediaData = {}) {
@@ -295,17 +326,20 @@ class BookMetadata {
       }
     ]
 
-    var updatePayload = {}
+    const updatePayload = {}
 
     // Metadata is only mapped to the book if it is empty
     MetadataMapArray.forEach((mapping) => {
-      var value = audioFileMetaTags[mapping.tag]
-      var tagToUse = mapping.tag
+      let value = audioFileMetaTags[mapping.tag]
+      // let tagToUse = mapping.tag
       if (!value && mapping.altTag) {
         value = audioFileMetaTags[mapping.altTag]
-        tagToUse = mapping.altTag
+        // tagToUse = mapping.altTag
       }
-      if (value) {
+
+      if (value && typeof value === 'string') {
+        value = value.trim() // Trim whitespace
+
         if (mapping.key === 'narrators' && (!this.narrators.length || overrideExistingDetails)) {
           updatePayload.narrators = this.parseNarratorsTag(value)
         } else if (mapping.key === 'authors' && (!this.authors.length || overrideExistingDetails)) {
@@ -313,7 +347,7 @@ class BookMetadata {
         } else if (mapping.key === 'genres' && (!this.genres.length || overrideExistingDetails)) {
           updatePayload.genres = this.parseGenresTag(value)
         } else if (mapping.key === 'series' && (!this.series.length || overrideExistingDetails)) {
-          var sequenceTag = audioFileMetaTags.tagSeriesPart || null
+          const sequenceTag = audioFileMetaTags.tagSeriesPart || null
           updatePayload.series = this.parseSeriesTag(value, sequenceTag)
         } else if (!this[mapping.key] || overrideExistingDetails) {
           updatePayload[mapping.key] = value
@@ -330,13 +364,13 @@ class BookMetadata {
 
   // Returns array of names in First Last format
   parseNarratorsTag(narratorsTag) {
-    var parsed = parseNameString.parse(narratorsTag)
+    const parsed = parseNameString.parse(narratorsTag)
     return parsed ? parsed.names : []
   }
 
   // Return array of authors minified with placeholder id
   parseAuthorsTag(authorsTag) {
-    var parsed = parseNameString.parse(authorsTag)
+    const parsed = parseNameString.parse(authorsTag)
     if (!parsed) return []
     return (parsed.names || []).map((au) => {
       return {
@@ -348,7 +382,7 @@ class BookMetadata {
 
   parseGenresTag(genreTag) {
     if (!genreTag || !genreTag.length) return []
-    var separators = ['/', '//', ';']
+    const separators = ['/', '//', ';']
     for (let i = 0; i < separators.length; i++) {
       if (genreTag.includes(separators[i])) {
         return genreTag.split(separators[i]).map(genre => genre.trim()).filter(g => !!g)
@@ -373,9 +407,12 @@ class BookMetadata {
   searchAuthors(query) {
     return this.authors.filter(au => cleanStringForSearch(au.name).includes(query))
   }
+  searchNarrators(query) {
+    return this.narrators.filter(n => cleanStringForSearch(n).includes(query))
+  }
   searchQuery(query) { // Returns key if match is found
-    var keysToCheck = ['title', 'asin', 'isbn']
-    for (var key of keysToCheck) {
+    const keysToCheck = ['title', 'asin', 'isbn', 'subtitle']
+    for (const key of keysToCheck) {
       if (this[key] && cleanStringForSearch(String(this[key])).includes(query)) {
         return {
           matchKey: key,

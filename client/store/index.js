@@ -13,16 +13,16 @@ export const state = () => ({
   playerQueueAutoPlay: true,
   playerIsFullscreen: false,
   editModalTab: 'details',
+  editPodcastModalTab: 'details',
   showEditModal: false,
   showEReader: false,
   selectedLibraryItem: null,
   developerMode: false,
-  selectedLibraryItems: [],
   processingBatch: false,
   previousPath: '/',
   showExperimentalFeatures: false,
-  backups: [],
   bookshelfBookIds: [],
+  episodeTableEpisodeIds: [],
   openModal: null,
   innerModalOpen: false,
   lastBookshelfScrollData: {},
@@ -30,14 +30,10 @@ export const state = () => ({
 })
 
 export const getters = {
-  getIsLibraryItemSelected: state => libraryItemId => {
-    return !!state.selectedLibraryItems.includes(libraryItemId)
-  },
   getServerSetting: state => key => {
     if (!state.serverSettings) return null
     return state.serverSettings[key]
   },
-  getNumLibraryItemsSelected: state => state.selectedLibraryItems.length,
   getLibraryItemIdStreaming: state => {
     return state.streamLibraryItem ? state.streamLibraryItem.id : null
   },
@@ -141,6 +137,9 @@ export const mutations = {
   setBookshelfBookIds(state, val) {
     state.bookshelfBookIds = val || []
   },
+  setEpisodeTableEpisodeIds(state, val) {
+    state.episodeTableEpisodeIds = val || []
+  },
   setPreviousPath(state, val) {
     state.previousPath = val
   },
@@ -204,6 +203,9 @@ export const mutations = {
   setShowEditModal(state, val) {
     state.showEditModal = val
   },
+  setEditPodcastModalTab(state, tab) {
+    state.editPodcastModalTab = tab
+  },
   showEReader(state, libraryItem) {
     state.selectedLibraryItem = libraryItem
 
@@ -218,35 +220,12 @@ export const mutations = {
   setSelectedLibraryItem(state, val) {
     Vue.set(state, 'selectedLibraryItem', val)
   },
-  setSelectedLibraryItems(state, items) {
-    Vue.set(state, 'selectedLibraryItems', items)
-  },
-  toggleLibraryItemSelected(state, itemId) {
-    if (state.selectedLibraryItems.includes(itemId)) {
-      state.selectedLibraryItems = state.selectedLibraryItems.filter(a => a !== itemId)
-    } else {
-      var newSel = state.selectedLibraryItems.concat([itemId])
-      Vue.set(state, 'selectedLibraryItems', newSel)
-    }
-  },
-  setLibraryItemSelected(state, { libraryItemId, selected }) {
-    var isThere = state.selectedLibraryItems.includes(libraryItemId)
-    if (isThere && !selected) {
-      state.selectedLibraryItems = state.selectedLibraryItems.filter(a => a !== libraryItemId)
-    } else if (selected && !isThere) {
-      var newSel = state.selectedLibraryItems.concat([libraryItemId])
-      Vue.set(state, 'selectedLibraryItems', newSel)
-    }
-  },
   setProcessingBatch(state, val) {
     state.processingBatch = val
   },
   setExperimentalFeatures(state, val) {
     state.showExperimentalFeatures = val
     localStorage.setItem('experimental', val ? 1 : 0)
-  },
-  setBackups(state, val) {
-    state.backups = val.sort((a, b) => b.createdAt - a.createdAt)
   },
   setOpenModal(state, val) {
     state.openModal = val

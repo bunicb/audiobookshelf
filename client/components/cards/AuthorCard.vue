@@ -13,10 +13,14 @@
 
         <!-- Search icon btn -->
         <div v-show="!searching && isHovering && userCanUpdate" class="absolute top-0 left-0 p-2 cursor-pointer hover:text-white text-gray-200 transform hover:scale-125 duration-150" @click.prevent.stop="searchAuthor">
-          <span class="material-icons text-lg">search</span>
+          <ui-tooltip :text="$strings.ButtonQuickMatch" direction="bottom">
+            <span class="material-icons text-lg">search</span>
+          </ui-tooltip>
         </div>
         <div v-show="isHovering && !searching && userCanUpdate" class="absolute top-0 right-0 p-2 cursor-pointer hover:text-white text-gray-200 transform hover:scale-125 duration-150" @click.prevent.stop="$emit('edit', author)">
-          <span class="material-icons text-lg">edit</span>
+          <ui-tooltip :text="$strings.LabelEdit" direction="bottom">
+            <span class="material-icons text-lg">edit</span>
+          </ui-tooltip>
         </div>
 
         <!-- Loading spinner -->
@@ -73,6 +77,12 @@ export default {
     },
     userCanUpdate() {
       return this.$store.getters['user/getUserCanUpdate']
+    },
+    currentLibraryId() {
+      return this.$store.state.libraries.currentLibraryId
+    },
+    libraryProvider() {
+      return this.$store.getters['libraries/getLibraryProvider'](this.currentLibraryId) || 'google'
     }
   },
   methods: {
@@ -87,6 +97,11 @@ export default {
       const payload = {}
       if (this.asin) payload.asin = this.asin
       else payload.q = this.name
+
+      payload.region = 'us'
+      if (this.libraryProvider.startsWith('audible.')) {
+        payload.region = this.libraryProvider.split('.').pop() || 'us'
+      }
 
       var response = await this.$axios.$post(`/api/authors/${this.authorId}/match`, payload).catch((error) => {
         console.error('Failed', error)

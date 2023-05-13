@@ -27,11 +27,7 @@ module.exports = {
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       { hid: 'description', name: 'description', content: '' }
     ],
-    script: [
-      {
-        src: (process.env.ROUTER_BASE_PATH || '') + '/libs/sortable.js'
-      }
-    ],
+    script: [],
     link: [
       { rel: 'icon', type: 'image/x-icon', href: (process.env.ROUTER_BASE_PATH || '') + '/favicon.ico' }
     ]
@@ -114,11 +110,19 @@ module.exports = {
         {
           src: (process.env.ROUTER_BASE_PATH || '') + '/icon.svg',
           sizes: "any"
+        },
+        {
+          src: (process.env.ROUTER_BASE_PATH || '') + '/icon64.png',
+          type: "image/png",
+          sizes: "64x64"
         }
       ]
     },
     workbox: {
-      enabled: false,
+      offline: false,
+      cacheAssets: false,
+      preCaching: [],
+      runtimeCaching: []
     }
   },
 

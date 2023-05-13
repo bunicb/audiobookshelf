@@ -46,7 +46,7 @@
                 <p class="text-xs font-mono">{{ $secondsToTimestamp(session.currentTime) }}</p>
               </td>
               <td class="text-center hidden sm:table-cell">
-                <ui-tooltip v-if="session.updatedAt" direction="top" :text="$formatDate(session.updatedAt, 'MMMM do, yyyy HH:mm')">
+                <ui-tooltip v-if="session.updatedAt" direction="top" :text="$formatDatetime(session.updatedAt, dateFormat, timeFormat)">
                   <p class="text-xs text-gray-200">{{ $dateDistanceFromNow(session.updatedAt) }}</p>
                 </ui-tooltip>
               </td>
@@ -86,6 +86,7 @@ export default {
       numPages: 0,
       total: 0,
       currentPage: 0,
+      itemsPerPage: 10,
       processingGoToTimestamp: false
     }
   },
@@ -95,10 +96,26 @@ export default {
     },
     userOnline() {
       return this.$store.getters['users/getIsUserOnline'](this.user.id)
+    },
+    dateFormat() {
+      return this.$store.state.serverSettings.dateFormat
+    },
+    timeFormat() {
+      return this.$store.state.serverSettings.timeFormat
     }
   },
   methods: {
     removedSession() {
+      // If on last page and this was the last session then load prev page
+      if (this.currentPage == this.numPages - 1) {
+        const newTotal = this.total - 1
+        const newNumPages = Math.ceil(newTotal / this.itemsPerPage)
+        if (newNumPages < this.numPages) {
+          this.prevPage()
+          return
+        }
+      }
+
       this.loadSessions(this.currentPage)
     },
     async clickCurrentTime(session) {
@@ -129,7 +146,7 @@ export default {
           episodeId: episode.id,
           title: episode.title,
           subtitle: libraryItem.media.metadata.title,
-          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
           duration: episode.audioFile.duration || null,
           coverPath: libraryItem.media.coverPath || null
         }
@@ -191,7 +208,7 @@ export default {
       return 'Unknown'
     },
     async loadSessions(page) {
-      const data = await this.$axios.$get(`/api/users/${this.user.id}/listening-sessions?page=${page}&itemsPerPage=10`).catch((err) => {
+      const data = await this.$axios.$get(`/api/users/${this.user.id}/listening-sessions?page=${page}&itemsPerPage=${this.itemsPerPage}`).catch((err) => {
         console.error('Failed to load listening sesions', err)
         return null
       })

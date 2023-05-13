@@ -5,6 +5,19 @@ const Path = require('path')
 const Logger = require('../Logger')
 const { AudioMimeType } = require('./constants')
 
+
+/**
+* Make sure folder separator is POSIX for Windows file paths. e.g. "C:\Users\Abs" becomes "C:/Users/Abs"
+*
+* @param {String} path - Ugly file path
+* @return {String} Pretty posix file path
+*/
+const filePathToPOSIX = (path) => {
+  if (!global.isWin || !path) return path
+  return path.replace(/\\/g, '/')
+}
+module.exports.filePathToPOSIX = filePathToPOSIX
+
 async function getFileStat(path) {
   try {
     var stat = await fs.stat(path)
@@ -80,11 +93,11 @@ function bytesPretty(bytes, decimals = 0) {
 module.exports.bytesPretty = bytesPretty
 
 async function recurseFiles(path, relPathToReplace = null) {
-  path = path.replace(/\\/g, '/')
+  path = filePathToPOSIX(path)
   if (!path.endsWith('/')) path = path + '/'
 
   if (relPathToReplace) {
-    relPathToReplace = relPathToReplace.replace(/\\/g, '/')
+    relPathToReplace = filePathToPOSIX(relPathToReplace)
     if (!relPathToReplace.endsWith('/')) relPathToReplace += '/'
   } else {
     relPathToReplace = path
@@ -161,20 +174,24 @@ async function recurseFiles(path, relPathToReplace = null) {
 }
 module.exports.recurseFiles = recurseFiles
 
-module.exports.downloadFile = async (url, filepath) => {
-  Logger.debug(`[fileUtils] Downloading file to ${filepath}`)
+module.exports.downloadFile = (url, filepath) => {
+  return new Promise(async (resolve, reject) => {
+    Logger.debug(`[fileUtils] Downloading file to ${filepath}`)
+    axios({
+      url,
+      method: 'GET',
+      responseType: 'stream',
+      timeout: 30000
+    }).then((response) => {
+      const writer = fs.createWriteStream(filepath)
+      response.data.pipe(writer)
 
-  const writer = fs.createWriteStream(filepath)
-  const response = await axios({
-    url,
-    method: 'GET',
-    responseType: 'stream',
-    timeout: 30000
-  })
-  response.data.pipe(writer)
-  return new Promise((resolve, reject) => {
-    writer.on('finish', resolve)
-    writer.on('error', reject)
+      writer.on('finish', resolve)
+      writer.on('error', reject)
+    }).catch((err) => {
+      Logger.error(`[fileUtils] Failed to download file "${filepath}"`, err)
+      reject(err)
+    })
   })
 }
 
@@ -183,18 +200,21 @@ module.exports.sanitizeFilename = (filename, colonReplacement = ' - ') => {
     return false
   }
 
-  // Max is actually 255-260 for windows but this leaves padding incase ext wasnt put on yet
-  const MAX_FILENAME_LEN = 240
+  // Most file systems use number of bytes for max filename
+  //   to support most filesystems we will use max of 255 bytes in utf-16
+  //   Ref: https://doc.owncloud.com/server/next/admin_manual/troubleshooting/path_filename_length.html
+  //   Issue: https://github.com/advplyr/audiobookshelf/issues/1261
+  const MAX_FILENAME_BYTES = 255
 
-  var replacement = ''
-  var illegalRe = /[\/\?<>\\:\*\|"]/g
-  var controlRe = /[\x00-\x1f\x80-\x9f]/g
-  var reservedRe = /^\.+$/
-  var windowsReservedRe = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i
-  var windowsTrailingRe = /[\. ]+$/
-  var lineBreaks = /[\n\r]/g
+  const replacement = ''
+  const illegalRe = /[\/\?<>\\:\*\|"]/g
+  const controlRe = /[\x00-\x1f\x80-\x9f]/g
+  const reservedRe = /^\.+$/
+  const windowsReservedRe = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i
+  const windowsTrailingRe = /[\. ]+$/
+  const lineBreaks = /[\n\r]/g
 
-  sanitized = filename
+  let sanitized = filename
     .replace(':', colonReplacement) // Replace first occurrence of a colon
     .replace(illegalRe, replacement)
     .replace(controlRe, replacement)
@@ -203,12 +223,25 @@ module.exports.sanitizeFilename = (filename, colonReplacement = ' - ') => {
     .replace(windowsReservedRe, replacement)
     .replace(windowsTrailingRe, replacement)
 
-  if (sanitized.length > MAX_FILENAME_LEN) {
-    var lenToRemove = sanitized.length - MAX_FILENAME_LEN
-    var ext = Path.extname(sanitized)
-    var basename = Path.basename(sanitized, ext)
-    basename = basename.slice(0, basename.length - lenToRemove)
-    sanitized = basename + ext
+  // Check if basename is too many bytes
+  const ext = Path.extname(sanitized) // separate out file extension
+  const basename = Path.basename(sanitized, ext)
+  const extByteLength = Buffer.byteLength(ext, 'utf16le')
+  const basenameByteLength = Buffer.byteLength(basename, 'utf16le')
+  if (basenameByteLength + extByteLength > MAX_FILENAME_BYTES) {
+    const MaxBytesForBasename = MAX_FILENAME_BYTES - extByteLength
+    let totalBytes = 0
+    let trimmedBasename = ''
+
+    // Add chars until max bytes is reached
+    for (const char of basename) {
+      totalBytes += Buffer.byteLength(char, 'utf16le')
+      if (totalBytes > MaxBytesForBasename) break
+      else trimmedBasename += char
+    }
+
+    trimmedBasename = trimmedBasename.trim()
+    sanitized = trimmedBasename + ext
   }
 
   return sanitized
@@ -228,4 +261,8 @@ module.exports.removeFile = (path) => {
     Logger.error(`[fileUtils] Failed remove file "${path}"`, error)
     return false
   })
+}
+
+module.exports.encodeUriPath = (path) => {
+  return filePathToPOSIX(path).replace(/%/g, '%25').replace(/#/g, '%23')
 }

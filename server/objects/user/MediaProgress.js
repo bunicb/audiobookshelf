@@ -10,6 +10,9 @@ class MediaProgress {
     this.isFinished = false
     this.hideFromContinueListening = false
 
+    this.ebookLocation = null // current cfi tag
+    this.ebookProgress = null // 0 to 1
+
     this.lastUpdate = null
     this.startedAt = null
     this.finishedAt = null
@@ -29,6 +32,8 @@ class MediaProgress {
       currentTime: this.currentTime,
       isFinished: this.isFinished,
       hideFromContinueListening: this.hideFromContinueListening,
+      ebookLocation: this.ebookLocation,
+      ebookProgress: this.ebookProgress,
       lastUpdate: this.lastUpdate,
       startedAt: this.startedAt,
       finishedAt: this.finishedAt
@@ -44,13 +49,15 @@ class MediaProgress {
     this.currentTime = progress.currentTime
     this.isFinished = !!progress.isFinished
     this.hideFromContinueListening = !!progress.hideFromContinueListening
+    this.ebookLocation = progress.ebookLocation || null
+    this.ebookProgress = progress.ebookProgress
     this.lastUpdate = progress.lastUpdate
     this.startedAt = progress.startedAt
     this.finishedAt = progress.finishedAt || null
   }
 
   get inProgress() {
-    return !this.isFinished && this.progress > 0
+    return !this.isFinished && (this.progress > 0 || this.ebookLocation != null)
   }
 
   setData(libraryItemId, progress, episodeId = null) {
@@ -62,17 +69,19 @@ class MediaProgress {
     this.currentTime = progress.currentTime || 0
     this.isFinished = !!progress.isFinished || this.progress == 1
     this.hideFromContinueListening = !!progress.hideFromContinueListening
+    this.ebookLocation = progress.ebookLocation
+    this.ebookProgress = Math.min(1, (progress.ebookProgress || 0))
     this.lastUpdate = Date.now()
-    this.startedAt = Date.now()
     this.finishedAt = null
     if (this.isFinished) {
-      this.finishedAt = Date.now()
+      this.finishedAt = progress.finishedAt || Date.now()
       this.progress = 1
     }
+    this.startedAt = progress.startedAt || this.finishedAt || Date.now()
   }
 
   update(payload) {
-    var hasUpdates = false
+    let hasUpdates = false
     for (const key in payload) {
       if (this[key] !== undefined && payload[key] !== this[key]) {
         if (key === 'isFinished') {
@@ -95,7 +104,7 @@ class MediaProgress {
     // If time remaining is less than 5 seconds then mark as finished
     if ((this.progress >= 1 || (this.duration && !isNaN(timeRemaining) && timeRemaining < 5))) {
       this.isFinished = true
-      this.finishedAt = Date.now()
+      this.finishedAt = payload.finishedAt || Date.now()
       this.progress = 1
     } else if (this.progress < 1 && this.isFinished) {
       this.isFinished = false
@@ -103,7 +112,7 @@ class MediaProgress {
     }
 
     if (!this.startedAt) {
-      this.startedAt = Date.now()
+      this.startedAt = this.finishedAt || Date.now()
     }
     if (hasUpdates) {
       if (payload.hideFromContinueListening === undefined) {

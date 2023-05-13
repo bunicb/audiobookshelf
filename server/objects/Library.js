@@ -1,6 +1,7 @@
 const Folder = require('./Folder')
 const LibrarySettings = require('./settings/LibrarySettings')
 const { getId } = require('../utils/index')
+const { filePathToPOSIX } = require('../utils/fileUtils')
 
 class Library {
   constructor(library = null) {
@@ -28,6 +29,9 @@ class Library {
   }
   get isPodcast() {
     return this.mediaType === 'podcast'
+  }
+  get isMusic() {
+    return this.mediaType === 'music'
   }
 
   construct(library) {
@@ -57,7 +61,9 @@ class Library {
       else if (this.icon === 'comic') this.icon = 'file-picture'
       else this.icon = 'database'
     }
-    if (!this.mediaType || (this.mediaType !== 'podcast' && this.mediaType !== 'book' && this.mediaType !== 'video')) {
+
+    const mediaTypes = ['podcast', 'book', 'video', 'music']
+    if (!this.mediaType || !mediaTypes.includes(this.mediaType)) {
       this.mediaType = 'book'
     }
   }
@@ -151,8 +157,8 @@ class Library {
   }
 
   checkFullPathInLibrary(fullPath) {
-    fullPath = fullPath.replace(/\\/g, '/')
-    return this.folders.find(folder => fullPath.startsWith(folder.fullPath.replace(/\\/g, '/')))
+    fullPath = filePathToPOSIX(fullPath)
+    return this.folders.find(folder => fullPath.startsWith(filePathToPOSIX(folder.fullPath)))
   }
 
   getFolderById(id) {

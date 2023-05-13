@@ -17,7 +17,7 @@
           <td>
             <p class="truncate text-xs sm:text-sm md:text-base">/{{ backup.path.replace(/\\/g, '/') }}</p>
           </td>
-          <td class="hidden sm:table-cell font-sans text-sm">{{ backup.datePretty }}</td>
+          <td class="hidden sm:table-cell font-sans text-sm">{{ $formatDatetime(backup.createdAt, dateFormat, timeFormat) }}</td>
           <td class="hidden sm:table-cell font-mono md:text-sm text-xs">{{ $bytesPretty(backup.fileSize) }}</td>
           <td>
             <div class="w-full flex flex-row items-center justify-center">
@@ -25,7 +25,7 @@
 
               <a v-if="backup.serverVersion" :href="`/metadata/${$encodeUriPath(backup.path)}?token=${userToken}`" class="mx-1 pt-1 hover:text-opacity-100 text-opacity-70 text-white" download><span class="material-icons text-xl">download</span></a>
               <ui-tooltip v-else text="This backup was created with an old version of audiobookshelf no longer supported" direction="bottom" class="mx-2 flex items-center">
-                <span class="material-icons-outlined text-error">error_outline</span>
+                <span class="material-icons-outlined text-2xl text-error">error_outline</span>
               </ui-tooltip>
 
               <span class="material-icons text-xl hover:text-error hover:text-opacity-100 text-opacity-70 text-white cursor-pointer mx-1" @click="deleteBackupClick(backup)">delete</span>
@@ -46,7 +46,7 @@
         <p class="text-error text-lg font-semibold">{{ $strings.MessageImportantNotice }}</p>
         <p class="text-base py-1" v-html="$strings.MessageRestoreBackupWarning" />
 
-        <p class="text-lg text-center my-8">{{ $strings.MessageRestoreBackupConfirm }} {{ selectedBackup.datePretty }}?</p>
+        <p class="text-lg text-center my-8">{{ $strings.MessageRestoreBackupConfirm }} {{ $formatDatetime(selectedBackup.createdAt, dateFormat, timeFormat) }}?</p>
         <div class="flex px-1 items-center">
           <ui-btn color="primary" @click="showConfirmApply = false">{{ $strings.ButtonNevermind }}</ui-btn>
           <div class="flex-grow" />
@@ -64,15 +64,19 @@ export default {
       showConfirmApply: false,
       selectedBackup: null,
       isBackingUp: false,
-      processing: false
+      processing: false,
+      backups: []
     }
   },
   computed: {
-    backups() {
-      return this.$store.state.backups || []
-    },
     userToken() {
       return this.$store.getters['user/getToken']
+    },
+    dateFormat() {
+      return this.$store.state.serverSettings.dateFormat
+    },
+    timeFormat() {
+      return this.$store.state.serverSettings.timeFormat
     }
   },
   methods: {
@@ -92,13 +96,12 @@ export default {
         })
     },
     deleteBackupClick(backup) {
-      if (confirm(this.$getString('MessageConfirmDeleteBackup', [backup.datePretty]))) {
+      if (confirm(this.$getString('MessageConfirmDeleteBackup', [this.$formatDatetime(backup.createdAt, this.dateFormat, this.timeFormat)]))) {
         this.processing = true
         this.$axios
           .$delete(`/api/backups/${backup.id}`)
-          .then((backups) => {
-            console.log('Backup deleted', backups)
-            this.$store.commit('setBackups', backups)
+          .then((data) => {
+            this.setBackups(data.backups || [])
             this.$toast.success(this.$strings.ToastBackupDeleteSuccess)
             this.processing = false
           })
@@ -117,10 +120,10 @@ export default {
       this.isBackingUp = true
       this.$axios
         .$post('/api/backups')
-        .then((backups) => {
+        .then((data) => {
           this.isBackingUp = false
           this.$toast.success(this.$strings.ToastBackupCreateSuccess)
-          this.$store.commit('setBackups', backups)
+          this.setBackups(data.backups || [])
         })
         .catch((error) => {
           this.isBackingUp = false
@@ -136,9 +139,8 @@ export default {
 
       this.$axios
         .$post('/api/backups/upload', form)
-        .then((result) => {
-          console.log('Upload backup result', result)
-          this.$store.commit('setBackups', result)
+        .then((data) => {
+          this.setBackups(data.backups || [])
           this.$toast.success(this.$strings.ToastBackupUploadSuccess)
           this.processing = false
         })
@@ -148,9 +150,29 @@ export default {
           this.$toast.error(errorMessage)
           this.processing = false
         })
+    },
+    setBackups(backups) {
+      backups.sort((a, b) => b.createdAt - a.createdAt)
+      this.backups = backups
+    },
+    loadBackups() {
+      this.processing = true
+      this.$axios
+        .$get('/api/backups')
+        .then((data) => {
+          this.setBackups(data.backups || [])
+        })
+        .catch((error) => {
+          console.error('Failed to load backups', error)
+          this.$toast.error('Failed to load backups')
+        })
+        .finally(() => {
+          this.processing = false
+        })
     }
   },
   mounted() {
+    this.loadBackups()
     if (this.$route.query.backup) {
       this.$toast.success('Backup applied successfully')
       this.$router.replace('/config')

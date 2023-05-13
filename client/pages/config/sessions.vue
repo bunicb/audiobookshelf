@@ -1,10 +1,6 @@
 <template>
-  <div class="w-full h-full">
-    <div class="bg-bg rounded-md shadow-lg border border-white border-opacity-5 p-4 mb-8">
-      <div class="flex items-center mb-2">
-        <h1 class="text-xl">{{ $strings.HeaderListeningSessions }}</h1>
-      </div>
-
+  <div>
+    <app-settings-content :header-text="$strings.HeaderListeningSessions">
       <div class="flex justify-end mb-2">
         <ui-dropdown v-model="selectedUser" :items="userItems" :label="$strings.LabelFilterByUser" small class="max-w-48" @input="updateUserFilter" />
       </div>
@@ -43,7 +39,7 @@
               <p class="text-xs font-mono">{{ $secondsToTimestamp(session.currentTime) }}</p>
             </td>
             <td class="text-center hidden sm:table-cell">
-              <ui-tooltip v-if="session.updatedAt" direction="top" :text="$formatDate(session.updatedAt, 'MMMM do, yyyy HH:mm')">
+              <ui-tooltip v-if="session.updatedAt" direction="top" :text="$formatDatetime(session.updatedAt, dateFormat, timeFormat)">
                 <p class="text-xs text-gray-200">{{ $dateDistanceFromNow(session.updatedAt) }}</p>
               </ui-tooltip>
             </td>
@@ -56,19 +52,63 @@
         </div>
       </div>
       <p v-else class="text-white text-opacity-50">{{ $strings.MessageNoListeningSessions }}</p>
-    </div>
 
-    <modals-listening-session-modal v-model="showSessionModal" :session="selectedSession" @removedSession="removedSession" />
+      <!-- open listening sessions table -->
+      <p v-if="openListeningSessions.length" class="text-lg mb-4 mt-8">Open Listening Sessions</p>
+      <div v-if="openListeningSessions.length" class="block max-w-full">
+        <table class="userSessionsTable">
+          <tr class="bg-primary bg-opacity-40">
+            <th class="w-48 min-w-48 text-left">{{ $strings.LabelItem }}</th>
+            <th class="w-20 min-w-20 text-left hidden md:table-cell">{{ $strings.LabelUser }}</th>
+            <th class="w-32 min-w-32 text-left hidden md:table-cell">{{ $strings.LabelPlayMethod }}</th>
+            <th class="w-32 min-w-32 text-left hidden sm:table-cell">{{ $strings.LabelDeviceInfo }}</th>
+            <th class="w-32 min-w-32">{{ $strings.LabelTimeListened }}</th>
+            <th class="w-16 min-w-16">{{ $strings.LabelLastTime }}</th>
+            <th class="flex-grow hidden sm:table-cell">{{ $strings.LabelLastUpdate }}</th>
+          </tr>
+
+          <tr v-for="session in openListeningSessions" :key="`open-${session.id}`" class="cursor-pointer" @click="showSession(session)">
+            <td class="py-1 max-w-48">
+              <p class="text-xs text-gray-200 truncate">{{ session.displayTitle }}</p>
+              <p class="text-xs text-gray-400 truncate">{{ session.displayAuthor }}</p>
+            </td>
+            <td class="hidden md:table-cell">
+              <p v-if="filteredUserUsername" class="text-xs">{{ filteredUserUsername }}</p>
+              <p v-else class="text-xs">{{ session.user ? session.user.username : 'N/A' }}</p>
+            </td>
+            <td class="hidden md:table-cell">
+              <p class="text-xs">{{ getPlayMethodName(session.playMethod) }}</p>
+            </td>
+            <td class="hidden sm:table-cell">
+              <p class="text-xs" v-html="getDeviceInfoString(session.deviceInfo)" />
+            </td>
+            <td class="text-center">
+              <p class="text-xs font-mono">{{ $elapsedPretty(session.timeListening) }}</p>
+            </td>
+            <td class="text-center hover:underline" @click.stop="clickCurrentTime(session)">
+              <p class="text-xs font-mono">{{ $secondsToTimestamp(session.currentTime) }}</p>
+            </td>
+            <td class="text-center hidden sm:table-cell">
+              <ui-tooltip v-if="session.updatedAt" direction="top" :text="$formatDatetime(session.updatedAt, dateFormat, timeFormat)">
+                <p class="text-xs text-gray-200">{{ $dateDistanceFromNow(session.updatedAt) }}</p>
+              </ui-tooltip>
+            </td>
+          </tr>
+        </table>
+      </div>
+    </app-settings-content>
+
+    <modals-listening-session-modal v-model="showSessionModal" :session="selectedSession" @removedSession="removedSession" @closedSession="closedSession" />
   </div>
 </template>
 
 <script>
 export default {
   async asyncData({ params, redirect, app }) {
-    var users = await app.$axios
+    const users = await app.$axios
       .$get('/api/users')
-      .then((users) => {
-        return users.sort((a, b) => {
+      .then((res) => {
+        return res.users.sort((a, b) => {
           return a.createdAt - b.createdAt
         })
       })
@@ -85,9 +125,11 @@ export default {
       showSessionModal: false,
       selectedSession: null,
       listeningSessions: [],
+      openListeningSessions: [],
       numPages: 0,
       total: 0,
       currentPage: 0,
+      itemsPerPage: 10,
       userFilter: null,
       selectedUser: '',
       processingGoToTimestamp: false
@@ -101,17 +143,36 @@ export default {
       return this.$store.getters['users/getIsUserOnline'](this.user.id)
     },
     userItems() {
-      var userItems = [{ value: '', text: 'All Users' }]
+      var userItems = [{ value: '', text: this.$strings.LabelAllUsers }]
       return userItems.concat(this.users.map((u) => ({ value: u.id, text: u.username })))
     },
     filteredUserUsername() {
       if (!this.userFilter) return null
       var user = this.users.find((u) => u.id === this.userFilter)
       return user ? user.username : null
+    },
+    dateFormat() {
+      return this.$store.state.serverSettings.dateFormat
+    },
+    timeFormat() {
+      return this.$store.state.serverSettings.timeFormat
     }
   },
   methods: {
+    closedSession() {
+      this.loadOpenSessions()
+    },
     removedSession() {
+      // If on last page and this was the last session then load prev page
+      if (this.currentPage == this.numPages - 1) {
+        const newTotal = this.total - 1
+        const newNumPages = Math.ceil(newTotal / this.itemsPerPage)
+        if (newNumPages < this.numPages) {
+          this.prevPage()
+          return
+        }
+      }
+
       this.loadSessions(this.currentPage)
     },
     async clickCurrentTime(session) {
@@ -142,7 +203,7 @@ export default {
           episodeId: episode.id,
           title: episode.title,
           subtitle: libraryItem.media.metadata.title,
-          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
           duration: episode.audioFile.duration || null,
           coverPath: libraryItem.media.coverPath || null
         }
@@ -208,8 +269,8 @@ export default {
     },
     async loadSessions(page) {
       var userFilterQuery = this.selectedUser ? `&user=${this.selectedUser}` : ''
-      const data = await this.$axios.$get(`/api/sessions?page=${page}&itemsPerPage=10${userFilterQuery}`).catch((err) => {
-        console.error('Failed to load listening sesions', err)
+      const data = await this.$axios.$get(`/api/sessions?page=${page}&itemsPerPage=${this.itemsPerPage}${userFilterQuery}`).catch((err) => {
+        console.error('Failed to load listening sessions', err)
         return null
       })
       if (!data) {
@@ -223,8 +284,24 @@ export default {
       this.listeningSessions = data.sessions
       this.userFilter = data.userFilter
     },
+    async loadOpenSessions() {
+      const data = await this.$axios.$get('/api/sessions/open').catch((err) => {
+        console.error('Failed to load open sessions', err)
+        return null
+      })
+      if (!data) {
+        this.$toast.error('Failed to load open sessions')
+        return
+      }
+
+      this.openListeningSessions = (data.sessions || []).map((s) => {
+        s.open = true
+        return s
+      })
+    },
     init() {
       this.loadSessions(0)
+      this.loadOpenSessions()
     }
   },
   mounted() {

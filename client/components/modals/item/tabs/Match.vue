@@ -34,13 +34,25 @@
       </div>
       <ui-checkbox v-model="selectAll" checkbox-bg="bg" @input="selectAllToggled" />
       <form @submit.prevent="submitMatchUpdate">
-        <div v-if="selectedMatchOrig.cover" class="flex items-center py-2">
-          <ui-checkbox v-model="selectedMatchUsage.cover" checkbox-bg="bg" @input="checkboxToggled" />
-          <ui-text-input-with-label v-model="selectedMatch.cover" :disabled="!selectedMatchUsage.cover" readonly :label="$strings.LabelCover" class="flex-grow mx-4" />
-          <div class="min-w-12 max-w-12 md:min-w-16 md:max-w-16">
-            <a :href="selectedMatch.cover" target="_blank" class="w-full bg-primary">
-              <img :src="selectedMatch.cover" class="h-full w-full object-contain" />
-            </a>
+        <div v-if="selectedMatchOrig.cover" class="flex flex-wrap md:flex-nowrap items-center justify-center">
+          <div class="flex flex-grow items-center py-2">
+            <ui-checkbox v-model="selectedMatchUsage.cover" checkbox-bg="bg" @input="checkboxToggled" />
+            <ui-text-input-with-label v-model="selectedMatch.cover" :disabled="!selectedMatchUsage.cover" readonly :label="$strings.LabelCover" class="flex-grow mx-4" />
+          </div>
+
+          <div class="flex py-2">
+            <div>
+              <p class="text-center text-gray-200">New</p>
+              <a :href="selectedMatch.cover" target="_blank" class="bg-primary">
+                <covers-preview-cover :src="selectedMatch.cover" :width="100" :book-cover-aspect-ratio="bookCoverAspectRatio" />
+              </a>
+            </div>
+            <div v-if="media.coverPath">
+              <p class="text-center text-gray-200">Current</p>
+              <a :href="$store.getters['globals/getLibraryItemCoverSrcById'](libraryItemId, null, true)" target="_blank" class="bg-primary">
+                <covers-preview-cover :src="$store.getters['globals/getLibraryItemCoverSrcById'](libraryItemId, null, true)" :width="100" :book-cover-aspect-ratio="bookCoverAspectRatio" />
+              </a>
+            </div>
           </div>
         </div>
         <div v-if="selectedMatchOrig.title" class="flex items-center py-2">
@@ -103,7 +115,7 @@
         <div v-if="selectedMatchOrig.genres && selectedMatchOrig.genres.length" class="flex items-center py-2">
           <ui-checkbox v-model="selectedMatchUsage.genres" checkbox-bg="bg" @input="checkboxToggled" />
           <div class="flex-grow ml-4">
-            <ui-multi-select v-model="selectedMatch.genres" :items="selectedMatch.genres" :disabled="!selectedMatchUsage.genres" :label="$strings.LabelGenres" />
+            <ui-multi-select v-model="selectedMatch.genres" :items="genres" :disabled="!selectedMatchUsage.genres" :label="$strings.LabelGenres" />
             <p v-if="mediaMetadata.genres" class="text-xs ml-1 text-white text-opacity-60">{{ $strings.LabelCurrently }} {{ mediaMetadata.genres.join(', ') }}</p>
           </div>
         </div>
@@ -164,6 +176,20 @@
             <p v-if="mediaMetadata.releaseDate" class="text-xs ml-1 text-white text-opacity-60">{{ $strings.LabelCurrently }} {{ mediaMetadata.releaseDate || '' }}</p>
           </div>
         </div>
+        <div v-if="selectedMatchOrig.explicit != null" class="flex items-center pb-2" :class="{ 'pt-2': mediaMetadata.explicit == null }">
+          <ui-checkbox v-model="selectedMatchUsage.explicit" checkbox-bg="bg" @input="checkboxToggled" />
+          <div class="flex-grow ml-4" :class="{ 'pt-4': mediaMetadata.explicit != null }">
+            <ui-checkbox v-model="selectedMatch.explicit" :label="$strings.LabelExplicit" :disabled="!selectedMatchUsage.explicit" :checkbox-bg="!selectedMatchUsage.explicit ? 'bg' : 'primary'" border-color="gray-600" label-class="pl-2 text-base font-semibold" />
+            <p v-if="mediaMetadata.explicit != null" class="text-xs ml-1 text-white text-opacity-60">{{ $strings.LabelCurrently }} {{ mediaMetadata.explicit ? 'Explicit (checked)' : 'Not Explicit (unchecked)' }}</p>
+          </div>
+        </div>
+        <div v-if="selectedMatchOrig.abridged != null" class="flex items-center pb-2" :class="{ 'pt-2': mediaMetadata.abridged == null }">
+          <ui-checkbox v-model="selectedMatchUsage.abridged" checkbox-bg="bg" @input="checkboxToggled" />
+          <div class="flex-grow ml-4" :class="{ 'pt-4': mediaMetadata.abridged != null }">
+            <ui-checkbox v-model="selectedMatch.abridged" :label="$strings.LabelAbridged" :disabled="!selectedMatchUsage.abridged" :checkbox-bg="!selectedMatchUsage.abridged ? 'bg' : 'primary'" border-color="gray-600" label-class="pl-2 text-base font-semibold" />
+            <p v-if="mediaMetadata.abridged != null" class="text-xs ml-1 text-white text-opacity-60">{{ $strings.LabelCurrently }} {{ mediaMetadata.abridged ? 'Abridged (checked)' : 'Unabridged (unchecked)' }}</p>
+          </div>
+        </div>
 
         <div class="flex items-center justify-end py-2">
           <ui-btn color="success" type="submit">{{ $strings.ButtonSubmit }}</ui-btn>
@@ -209,6 +235,7 @@ export default {
         explicit: true,
         asin: true,
         isbn: true,
+        abridged: true,
         // Podcast specific
         itunesPageUrl: true,
         itunesId: true,
@@ -273,6 +300,12 @@ export default {
     },
     isPodcast() {
       return this.mediaType == 'podcast'
+    },
+    genres() {
+      const filterData = this.$store.state.libraries.filterData || {}
+      const currentGenres = filterData.genres || []
+      const selectedMatchGenres = this.selectedMatch.genres || []
+      return [...new Set([...currentGenres ,...selectedMatchGenres])]
     }
   },
   methods: {
@@ -306,13 +339,13 @@ export default {
       this.runSearch()
     },
     async runSearch() {
-      var searchQuery = this.getSearchQuery()
+      const searchQuery = this.getSearchQuery()
       if (this.lastSearch === searchQuery) return
       this.searchResults = []
       this.isProcessing = true
       this.lastSearch = searchQuery
-      var searchEntity = this.isPodcast ? 'podcast' : 'books'
-      var results = await this.$axios.$get(`/api/search/${searchEntity}?${searchQuery}`, { timeout: 20000 }).catch((error) => {
+      const searchEntity = this.isPodcast ? 'podcast' : 'books'
+      let results = await this.$axios.$get(`/api/search/${searchEntity}?${searchQuery}`, { timeout: 20000 }).catch((error) => {
         console.error('Failed', error)
         return []
       })
@@ -327,6 +360,7 @@ export default {
           res.itunesPageUrl = res.pageUrl || null
           res.itunesId = res.id || null
           res.author = res.artistName || null
+          res.explicit = res.explicit || false
           return res
         })
       }
@@ -335,8 +369,7 @@ export default {
       this.isProcessing = false
       this.hasSearched = true
     },
-    init() {
-      this.clearSelectedMatch()
+    initSelectedMatchUsage() {
       this.selectedMatchUsage = {
         title: true,
         subtitle: true,
@@ -353,12 +386,34 @@ export default {
         explicit: true,
         asin: true,
         isbn: true,
+        abridged: true,
         // Podcast specific
         itunesPageUrl: true,
         itunesId: true,
         feedUrl: true,
         releaseDate: true
       }
+
+      // Load saved selected match from local storage
+      try {
+        let savedSelectedMatchUsage = localStorage.getItem('selectedMatchUsage')
+        if (!savedSelectedMatchUsage) return
+        savedSelectedMatchUsage = JSON.parse(savedSelectedMatchUsage)
+
+        for (const key in savedSelectedMatchUsage) {
+          if (this.selectedMatchUsage[key] !== undefined) {
+            this.selectedMatchUsage[key] = !!savedSelectedMatchUsage[key]
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load saved selectedMatchUsage', error)
+      }
+
+      this.checkboxToggled()
+    },
+    init() {
+      this.clearSelectedMatch()
+      this.initSelectedMatchUsage()
 
       if (this.libraryItem.id !== this.libraryItemId) {
         this.searchResults = []
@@ -375,6 +430,12 @@ export default {
       this.searchAuthor = this.libraryItem.media.metadata.authorName || ''
       if (this.isPodcast) this.provider = 'itunes'
       else this.provider = localStorage.getItem('book-provider') || 'google'
+
+      // Prefer using ASIN if set and using audible provider
+      if (this.provider.startsWith('audible') && this.libraryItem.media.metadata.asin) {
+        this.searchTitle = this.libraryItem.media.metadata.asin
+        this.searchAuthor = ''
+      }
 
       if (this.searchTitle) {
         this.submitSearch()
@@ -442,7 +503,6 @@ export default {
           } else if (key === 'narrator') {
             updatePayload.metadata.narrators = this.selectedMatch[key].split(',').map((v) => v.trim())
           } else if (key === 'genres') {
-            // updatePayload.metadata.genres = this.selectedMatch[key].split(',').map((v) => v.trim())
             updatePayload.metadata.genres = [...this.selectedMatch[key]]
           } else if (key === 'tags') {
             updatePayload.tags = this.selectedMatch[key].split(',').map((v) => v.trim())
@@ -465,11 +525,14 @@ export default {
       console.log('Match payload', updatePayload)
       this.isProcessing = true
 
+      // Persist in local storage
+      localStorage.setItem('selectedMatchUsage', JSON.stringify(this.selectedMatchUsage))
+
       if (updatePayload.metadata.cover) {
-        var coverPayload = {
+        const coverPayload = {
           url: updatePayload.metadata.cover
         }
-        var success = await this.$axios.$post(`/api/items/${this.libraryItemId}/cover`, coverPayload).catch((error) => {
+        const success = await this.$axios.$post(`/api/items/${this.libraryItemId}/cover`, coverPayload).catch((error) => {
           console.error('Failed to update', error)
           return false
         })
@@ -483,8 +546,8 @@ export default {
       }
 
       if (Object.keys(updatePayload).length) {
-        var mediaUpdatePayload = updatePayload
-        var updateResult = await this.$axios.$patch(`/api/items/${this.libraryItemId}/media`, mediaUpdatePayload).catch((error) => {
+        const mediaUpdatePayload = updatePayload
+        const updateResult = await this.$axios.$patch(`/api/items/${this.libraryItemId}/media`, mediaUpdatePayload).catch((error) => {
           console.error('Failed to update', error)
           return false
         })
@@ -502,6 +565,7 @@ export default {
       } else {
         this.clearSelectedMatch()
       }
+
       this.isProcessing = false
     },
     clearSelectedMatch() {

@@ -62,19 +62,49 @@
     <div class="w-full h-px bg-white bg-opacity-10 my-8" />
 
     <div class="w-full max-w-4xl mx-auto">
-      <div v-if="selectedTool === 'embed'" class="w-full flex justify-end items-center mb-4">
-        <ui-btn v-if="!isFinished" color="primary" :loading="processing" @click.stop="embedClick">{{ $strings.ButtonStartMetadataEmbed }}</ui-btn>
+      <!-- queued alert -->
+      <widgets-alert v-if="isMetadataEmbedQueued" type="warning" class="mb-4">
+        <p class="text-lg">Audiobook is queued for metadata embed ({{ queuedEmbedLIds.length }} in queue)</p>
+      </widgets-alert>
+      <!-- metadata embed action buttons -->
+      <div v-else-if="isEmbedTool" class="w-full flex justify-end items-center mb-4">
+        <ui-checkbox v-if="!isTaskFinished" v-model="shouldBackupAudioFiles" :disabled="processing" label="Backup audio files" medium checkbox-bg="bg" label-class="pl-2 text-base md:text-lg" @input="toggleBackupAudioFiles" />
+
+        <div class="flex-grow" />
+
+        <ui-btn v-if="!isTaskFinished" color="primary" :loading="processing" @click.stop="embedClick">{{ $strings.ButtonStartMetadataEmbed }}</ui-btn>
         <p v-else class="text-success text-lg font-semibold">{{ $strings.MessageEmbedFinished }}</p>
       </div>
-      <div v-else class="w-full flex justify-end items-center mb-4">
+      <!-- m4b embed action buttons -->
+      <div v-else class="w-full flex items-center mb-4">
+        <button :disabled="processing" class="text-sm uppercase text-gray-200 flex items-center pt-px pl-1 pr-2 hover:bg-white/5 rounded-md" @click="showEncodeOptions = !showEncodeOptions">
+          <span class="material-icons text-xl">{{ showEncodeOptions ? 'check_box' : 'check_box_outline_blank' }}</span> <span class="pl-1">Use Advanced Options</span>
+        </button>
+
+        <div class="flex-grow" />
+
         <ui-btn v-if="!isTaskFinished && processing" color="error" :loading="isCancelingEncode" class="mr-2" @click.stop="cancelEncodeClick">{{ $strings.ButtonCancelEncode }}</ui-btn>
         <ui-btn v-if="!isTaskFinished" color="primary" :loading="processing" @click.stop="encodeM4bClick">{{ $strings.ButtonStartM4BEncode }}</ui-btn>
         <p v-else-if="taskFailed" class="text-error text-lg font-semibold">{{ $strings.MessageM4BFailed }} {{ taskError }}</p>
         <p v-else class="text-success text-lg font-semibold">{{ $strings.MessageM4BFinished }}</p>
       </div>
 
+      <!-- advanced encoding options -->
+      <div v-if="isM4BTool" class="overflow-hidden">
+        <transition name="slide">
+          <div v-if="showEncodeOptions" class="mb-4 pb-4 border-b border-white/10">
+            <div class="flex flex-wrap -mx-2">
+              <ui-text-input-with-label ref="bitrateInput" v-model="encodingOptions.bitrate" :disabled="processing || isTaskFinished" :label="'Audio Bitrate (e.g. 64k)'" class="m-2 max-w-40" />
+              <ui-text-input-with-label ref="channelsInput" v-model="encodingOptions.channels" :disabled="processing || isTaskFinished" :label="'Audio Channels (1 or 2)'" class="m-2 max-w-40" />
+              <ui-text-input-with-label ref="codecInput" v-model="encodingOptions.codec" :disabled="processing || isTaskFinished" :label="'Audio Codec'" class="m-2 max-w-40" />
+            </div>
+            <p class="text-sm text-warning">Warning: Do not update these settings unless you are familiar with ffmpeg encoding options.</p>
+          </div>
+        </transition>
+      </div>
+
       <div class="mb-4">
-        <div v-if="selectedTool === 'embed'" class="flex items-start mb-2">
+        <div v-if="isEmbedTool" class="flex items-start mb-2">
           <span class="material-icons text-base text-warning pt-1">star</span>
           <p class="text-gray-200 ml-2">Metadata will be embedded in the audio tracks inside your audiobook folder.</p>
         </div>
@@ -85,21 +115,21 @@
           </p>
         </div>
 
-        <div class="flex items-start mb-2">
+        <div v-if="shouldBackupAudioFiles || isM4BTool" class="flex items-start mb-2">
           <span class="material-icons text-base text-warning pt-1">star</span>
           <p class="text-gray-200 ml-2">
             A backup of your original audio files will be stored in <span class="rounded-md bg-neutral-600 text-sm text-white py-0.5 px-1 font-mono">/metadata/cache/items/{{ libraryItemId }}/</span>. Make sure to periodically purge items cache.
           </p>
         </div>
-        <div v-if="selectedTool === 'embed' && audioFiles.length > 1" class="flex items-start mb-2">
+        <div v-if="isEmbedTool && audioFiles.length > 1" class="flex items-start mb-2">
           <span class="material-icons text-base text-warning pt-1">star</span>
           <p class="text-gray-200 ml-2">Chapters are not embedded in multi-track audiobooks.</p>
         </div>
-        <div v-if="selectedTool === 'm4b'" class="flex items-start mb-2">
+        <div v-if="isM4BTool" class="flex items-start mb-2">
           <span class="material-icons text-base text-warning pt-1">star</span>
           <p class="text-gray-200 ml-2">Encoding can take up to 30 minutes.</p>
         </div>
-        <div v-if="selectedTool === 'm4b'" class="flex items-start mb-2">
+        <div v-if="isM4BTool" class="flex items-start mb-2">
           <span class="material-icons text-base text-warning pt-1">star</span>
           <p class="text-gray-200 ml-2">If you have the watcher disabled you will need to re-scan this audiobook afterwards.</p>
         </div>
@@ -152,7 +182,7 @@ export default {
     if (!store.getters['user/getIsAdminOrUp']) {
       return redirect('/?error=unauthorized')
     }
-    var libraryItem = await app.$axios.$get(`/api/items/${params.id}?expanded=1`).catch((error) => {
+    const libraryItem = await app.$axios.$get(`/api/items/${params.id}?expanded=1`).catch((error) => {
       console.error('Failed', error)
       return false
     })
@@ -168,6 +198,7 @@ export default {
       cnosole.error('No audio files')
       return redirect('/?error=no audio files')
     }
+
     return {
       libraryItem
     }
@@ -177,10 +208,16 @@ export default {
       processing: false,
       audiofilesEncoding: {},
       audiofilesFinished: {},
-      isFinished: false,
       toneObject: null,
       selectedTool: 'embed',
-      isCancelingEncode: false
+      isCancelingEncode: false,
+      showEncodeOptions: false,
+      shouldBackupAudioFiles: true,
+      encodingOptions: {
+        bitrate: '64k',
+        channels: '2',
+        codec: 'aac'
+      }
     }
   },
   watch: {
@@ -193,6 +230,12 @@ export default {
     }
   },
   computed: {
+    isEmbedTool() {
+      return this.selectedTool === 'embed'
+    },
+    isM4BTool() {
+      return this.selectedTool === 'm4b'
+    },
     libraryItemId() {
       return this.libraryItem.id
     },
@@ -236,18 +279,38 @@ export default {
     isTaskFinished() {
       return this.task && this.task.isFinished
     },
+    tasks() {
+      return this.$store.getters['tasks/getTasksByLibraryItemId'](this.libraryItemId)
+    },
+    embedTask() {
+      return this.tasks.find((t) => t.action === 'embed-metadata')
+    },
+    encodeTask() {
+      return this.tasks.find((t) => t.action === 'encode-m4b')
+    },
     task() {
-      return this.$store.getters['tasks/getTaskByLibraryItemId'](this.libraryItemId)
+      if (this.isEmbedTool) return this.embedTask
+      else if (this.isM4BTool) return this.encodeTask
+      return null
     },
     taskRunning() {
       return this.task && !this.task.isFinished
+    },
+    queuedEmbedLIds() {
+      return this.$store.state.tasks.queuedEmbedLIds || []
+    },
+    isMetadataEmbedQueued() {
+      return this.queuedEmbedLIds.some((lid) => lid === this.libraryItemId)
     }
   },
   methods: {
+    toggleBackupAudioFiles(val) {
+      localStorage.setItem('embedMetadataShouldBackup', val ? 1 : 0)
+    },
     cancelEncodeClick() {
       this.isCancelingEncode = true
       this.$axios
-        .$post(`/api/encode-m4b/${this.libraryItemId}/cancel`)
+        .$delete(`/api/tools/item/${this.libraryItemId}/encode-m4b`)
         .then(() => {
           this.$toast.success('Encode canceled')
         })
@@ -260,16 +323,30 @@ export default {
         })
     },
     encodeM4bClick() {
+      if (this.$refs.bitrateInput) this.$refs.bitrateInput.blur()
+      if (this.$refs.channelsInput) this.$refs.channelsInput.blur()
+      if (this.$refs.codecInput) this.$refs.codecInput.blur()
+
+      let queryStr = ''
+      if (this.showEncodeOptions) {
+        const options = []
+        if (this.encodingOptions.bitrate) options.push(`bitrate=${this.encodingOptions.bitrate}`)
+        if (this.encodingOptions.channels) options.push(`channels=${this.encodingOptions.channels}`)
+        if (this.encodingOptions.codec) options.push(`codec=${this.encodingOptions.codec}`)
+        if (options.length) {
+          queryStr = `?${options.join('&')}`
+        }
+      }
       this.processing = true
       this.$axios
-        .$get(`/api/encode-m4b/${this.libraryItemId}`)
+        .$post(`/api/tools/item/${this.libraryItemId}/encode-m4b${queryStr}`)
         .then(() => {
           console.log('Ab m4b merge started')
         })
         .catch((error) => {
           var errorMsg = error.response ? error.response.data || 'Unknown Error' : 'Unknown Error'
           this.$toast.error(errorMsg)
-          this.processing = true
+          this.processing = false
         })
     },
     embedClick() {
@@ -287,7 +364,7 @@ export default {
     updateAudioFileMetadata() {
       this.processing = true
       this.$axios
-        .$get(`/api/items/${this.libraryItemId}/audio-metadata?tone=1`)
+        .$post(`/api/tools/item/${this.libraryItemId}/embed-metadata?backup=${this.shouldBackupAudioFiles ? 1 : 0}`)
         .then(() => {
           console.log('Audio metadata encode started')
         })
@@ -295,19 +372,6 @@ export default {
           console.error('Audio metadata encode failed', error)
           this.processing = false
         })
-    },
-    audioMetadataStarted(data) {
-      console.log('audio metadata started', data)
-      if (data.libraryItemId !== this.libraryItemId) return
-      this.audiofilesFinished = {}
-    },
-    audioMetadataFinished(data) {
-      console.log('audio metadata finished', data)
-      if (data.libraryItemId !== this.libraryItemId) return
-      this.processing = false
-      this.isFinished = true
-      this.audiofilesEncoding = {}
-      this.$toast.success('Audio file metadata updated')
     },
     audiofileMetadataStarted(data) {
       if (data.libraryItemId !== this.libraryItemId) return
@@ -333,6 +397,9 @@ export default {
       }
 
       if (this.task) this.taskUpdated(this.task)
+
+      const shouldBackupAudioFiles = localStorage.getItem('embedMetadataShouldBackup')
+      this.shouldBackupAudioFiles = shouldBackupAudioFiles != 0
     },
     fetchToneObject() {
       this.$axios
@@ -351,14 +418,10 @@ export default {
   },
   mounted() {
     this.init()
-    this.$root.socket.on('audio_metadata_started', this.audioMetadataStarted)
-    this.$root.socket.on('audio_metadata_finished', this.audioMetadataFinished)
     this.$root.socket.on('audiofile_metadata_started', this.audiofileMetadataStarted)
     this.$root.socket.on('audiofile_metadata_finished', this.audiofileMetadataFinished)
   },
   beforeDestroy() {
-    this.$root.socket.off('audio_metadata_started', this.audioMetadataStarted)
-    this.$root.socket.off('audio_metadata_finished', this.audioMetadataFinished)
     this.$root.socket.off('audiofile_metadata_started', this.audiofileMetadataStarted)
     this.$root.socket.off('audiofile_metadata_finished', this.audiofileMetadataFinished)
   }

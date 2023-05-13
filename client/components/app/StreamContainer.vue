@@ -1,21 +1,25 @@
 <template>
-  <div v-if="streamLibraryItem" id="streamContainer" class="w-full fixed bottom-0 left-0 right-0 h-48 sm:h-44 md:h-40 z-40 bg-primary px-4 pb-1 md:pb-4 pt-2">
+  <div v-if="streamLibraryItem" id="streamContainer" class="w-full fixed bottom-0 left-0 right-0 h-48 md:h-40 z-50 bg-primary px-2 md:px-4 pb-1 md:pb-4 pt-2">
     <div id="videoDock" />
-    <nuxt-link v-if="!playerHandler.isVideo" :to="`/item/${streamLibraryItem.id}`" class="absolute left-1 sm:left-4 cursor-pointer" :style="{ top: bookCoverPosTop + 'px' }">
+    <nuxt-link v-if="!playerHandler.isVideo" :to="`/item/${streamLibraryItem.id}`" class="absolute left-2 top-2 md:left-4 cursor-pointer">
       <covers-book-cover :library-item="streamLibraryItem" :width="bookCoverWidth" :book-cover-aspect-ratio="coverAspectRatio" />
     </nuxt-link>
-    <div class="flex items-start mb-6 md:mb-0" :class="playerHandler.isVideo ? 'ml-4 pl-96' : 'pl-20 sm:pl-24'">
-      <div>
-        <nuxt-link :to="`/item/${streamLibraryItem.id}`" class="hover:underline cursor-pointer text-sm sm:text-lg">
+    <div class="flex items-start mb-6 md:mb-0" :class="playerHandler.isVideo ? 'ml-4 pl-96' : isSquareCover ? 'pl-18 sm:pl-24' : 'pl-12 sm:pl-16'">
+      <div class="min-w-0">
+        <nuxt-link :to="`/item/${streamLibraryItem.id}`" class="hover:underline cursor-pointer text-sm sm:text-lg block truncate">
           {{ title }}
         </nuxt-link>
         <div v-if="!playerHandler.isVideo" class="text-gray-400 flex items-center">
           <span class="material-icons text-sm">person</span>
-          <p v-if="podcastAuthor" class="pl-1 sm:pl-1.5 text-xs sm:text-base">{{ podcastAuthor }}</p>
-          <p v-else-if="authors.length" class="pl-1 sm:pl-1.5 text-xs sm:text-base">
-            <nuxt-link v-for="(author, index) in authors" :key="index" :to="`/author/${author.id}`" class="hover:underline">{{ author.name }}<span v-if="index < authors.length - 1">,&nbsp;</span></nuxt-link>
-          </p>
-          <p v-else class="text-xs sm:text-base cursor-pointer pl-1 sm:pl-1.5">{{ $strings.LabelUnknown }}</p>
+          <div class="flex items-center">
+            <div v-if="podcastAuthor" class="pl-1 sm:pl-1.5 text-xs sm:text-base">{{ podcastAuthor }}</div>
+            <div v-else-if="musicArtists" class="pl-1 sm:pl-1.5 text-xs sm:text-base">{{ musicArtists }}</div>
+            <div v-else-if="authors.length" class="pl-1 sm:pl-1.5 text-xs sm:text-base">
+              <nuxt-link v-for="(author, index) in authors" :key="index" :to="`/author/${author.id}`" class="hover:underline">{{ author.name }}<span v-if="index < authors.length - 1">,&nbsp;</span></nuxt-link>
+            </div>
+            <div v-else class="text-xs sm:text-base cursor-pointer pl-1 sm:pl-1.5">{{ $strings.LabelUnknown }}</div>
+            <widgets-explicit-indicator :explicit="isExplicit"></widgets-explicit-indicator>
+          </div>
         </div>
 
         <div class="text-gray-400 flex items-center">
@@ -24,7 +28,9 @@
         </div>
       </div>
       <div class="flex-grow" />
-      <span class="material-icons sm:px-2 py-1 md:p-4 cursor-pointer text-xl sm:text-2xl" @click="closePlayer">close</span>
+      <ui-tooltip direction="top" :text="$strings.LabelClosePlayer">
+        <span class="material-icons sm:px-2 py-1 md:p-4 cursor-pointer text-xl sm:text-2xl" @click="closePlayer">close</span>
+      </ui-tooltip>
     </div>
     <player-ui
       ref="audioPlayer"
@@ -75,7 +81,7 @@ export default {
       sleepTimerRemaining: 0,
       sleepTimer: null,
       displayTitle: null,
-      initialPlaybackRate: 1,
+      currentPlaybackRate: 1,
       syncFailedToast: null
     }
   },
@@ -83,12 +89,15 @@ export default {
     coverAspectRatio() {
       return this.$store.getters['libraries/getBookCoverAspectRatio']
     },
-    bookCoverWidth() {
-      return 88
+    isSquareCover() {
+      return this.coverAspectRatio === 1
     },
-    bookCoverPosTop() {
-      if (this.coverAspectRatio == 1) return -10
-      return -64
+    isMobile() {
+      return this.$store.state.globals.isMobile
+    },
+    bookCoverWidth() {
+      if (this.isMobile) return 64 / this.coverAspectRatio
+      return 77 / this.coverAspectRatio
     },
     cover() {
       if (this.media.coverPath) return this.media.coverPath
@@ -111,19 +120,31 @@ export default {
     streamLibraryItem() {
       return this.$store.state.streamLibraryItem
     },
+    streamEpisode() {
+      if (!this.$store.state.streamEpisodeId) return null
+      const episodes = this.streamLibraryItem.media.episodes || []
+      return episodes.find((ep) => ep.id === this.$store.state.streamEpisodeId)
+    },
     libraryItemId() {
-      return this.streamLibraryItem ? this.streamLibraryItem.id : null
+      return this.streamLibraryItem?.id || null
     },
     media() {
-      return this.streamLibraryItem ? this.streamLibraryItem.media || {} : {}
+      return this.streamLibraryItem?.media || {}
     },
     isPodcast() {
-      return this.streamLibraryItem ? this.streamLibraryItem.mediaType === 'podcast' : false
+      return this.streamLibraryItem?.mediaType === 'podcast'
+    },
+    isMusic() {
+      return this.streamLibraryItem?.mediaType === 'music'
+    },
+    isExplicit() {
+      return this.mediaMetadata.explicit || false
     },
     mediaMetadata() {
       return this.media.metadata || {}
     },
     chapters() {
+      if (this.streamEpisode) return this.streamEpisode.chapters || []
       return this.media.chapters || []
     },
     title() {
@@ -137,11 +158,16 @@ export default {
       return this.streamLibraryItem ? this.streamLibraryItem.libraryId : null
     },
     totalDurationPretty() {
-      return this.$secondsToTimestamp(this.totalDuration)
+      // Adjusted by playback rate
+      return this.$secondsToTimestamp(this.totalDuration / this.currentPlaybackRate)
     },
     podcastAuthor() {
       if (!this.isPodcast) return null
       return this.mediaMetadata.author || 'Unknown'
+    },
+    musicArtists() {
+      if (!this.isMusic) return null
+      return this.mediaMetadata.artists.join(', ')
     },
     playerQueueItems() {
       return this.$store.state.playerQueueItems || []
@@ -236,7 +262,7 @@ export default {
       this.playerHandler.setVolume(volume)
     },
     setPlaybackRate(playbackRate) {
-      this.initialPlaybackRate = playbackRate
+      this.currentPlaybackRate = playbackRate
       this.playerHandler.setPlaybackRate(playbackRate)
     },
     seek(time) {
@@ -297,6 +323,16 @@ export default {
         this.playerHandler.seek(e.seekTime)
       }
     },
+    mediaSessionPreviousTrack() {
+      if (this.$refs.audioPlayer) {
+        this.$refs.audioPlayer.prevChapter()
+      }
+    },
+    mediaSessionNextTrack() {
+      if (this.$refs.audioPlayer) {
+        this.$refs.audioPlayer.nextChapter()
+      }
+    },
     updateMediaSessionPlaybackState() {
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = this.isPlaying ? 'playing' : 'paused'
@@ -330,20 +366,22 @@ export default {
         navigator.mediaSession.setActionHandler('seekbackward', this.mediaSessionSeekBackward)
         navigator.mediaSession.setActionHandler('seekforward', this.mediaSessionSeekForward)
         navigator.mediaSession.setActionHandler('seekto', this.mediaSessionSeekTo)
-        // navigator.mediaSession.setActionHandler('previoustrack')
-        // navigator.mediaSession.setActionHandler('nexttrack')
+        navigator.mediaSession.setActionHandler('previoustrack', this.mediaSessionSeekBackward)
+        navigator.mediaSession.setActionHandler('nexttrack', this.mediaSessionSeekForward)
       } else {
         console.warn('Media session not available')
       }
     },
     streamProgress(data) {
-      if (!data.numSegments) return
-      var chunks = data.chunks
-      console.log(`[StreamContainer] Stream Progress ${data.percent}`)
-      if (this.$refs.audioPlayer) {
-        this.$refs.audioPlayer.setChunksReady(chunks, data.numSegments)
-      } else {
-        console.error('No Audio Ref')
+      if (this.playerHandler.isPlayingLocalItem && this.playerHandler.currentStreamId === data.stream) {
+        if (!data.numSegments) return
+        var chunks = data.chunks
+        console.log(`[StreamContainer] Stream Progress ${data.percent}`)
+        if (this.$refs.audioPlayer) {
+          this.$refs.audioPlayer.setChunksReady(chunks, data.numSegments)
+        } else {
+          console.error('No Audio Ref')
+        }
       }
     },
     sessionOpen(session) {
@@ -352,7 +390,7 @@ export default {
         libraryItem: session.libraryItem,
         episodeId: session.episodeId
       })
-      this.playerHandler.prepareOpenSession(session, this.initialPlaybackRate)
+      this.playerHandler.prepareOpenSession(session, this.currentPlaybackRate)
     },
     streamOpen(session) {
       console.log(`[StreamContainer] Stream session open`, session)
@@ -365,7 +403,7 @@ export default {
       }
     },
     streamReady() {
-      console.log(`[STREAM-CONTAINER] Stream Ready`)
+      console.log(`[StreamContainer] Stream Ready`)
       if (this.$refs.audioPlayer) {
         this.$refs.audioPlayer.setStreamReady()
       } else {
@@ -392,8 +430,8 @@ export default {
       }
     },
     async playLibraryItem(payload) {
-      var libraryItemId = payload.libraryItemId
-      var episodeId = payload.episodeId || null
+      const libraryItemId = payload.libraryItemId
+      const episodeId = payload.episodeId || null
 
       if (this.playerHandler.libraryItemId == libraryItemId && this.playerHandler.episodeId == episodeId) {
         if (payload.startTime !== null && !isNaN(payload.startTime)) {
@@ -404,11 +442,12 @@ export default {
         return
       }
 
-      var libraryItem = await this.$axios.$get(`/api/items/${libraryItemId}?expanded=1`).catch((error) => {
+      const libraryItem = await this.$axios.$get(`/api/items/${libraryItemId}?expanded=1`).catch((error) => {
         console.error('Failed to fetch full item', error)
         return null
       })
       if (!libraryItem) return
+
       this.$store.commit('setMediaPlaying', {
         libraryItem,
         episodeId,
@@ -418,7 +457,7 @@ export default {
         if (this.$refs.audioPlayer) this.$refs.audioPlayer.checkUpdateChapterTrack()
       })
 
-      this.playerHandler.load(libraryItem, episodeId, true, this.initialPlaybackRate, payload.startTime)
+      this.playerHandler.load(libraryItem, episodeId, true, this.currentPlaybackRate, payload.startTime)
     },
     pauseItem() {
       this.playerHandler.pause()
@@ -426,6 +465,13 @@ export default {
     showFailedProgressSyncs() {
       if (!isNaN(this.syncFailedToast)) this.$toast.dismiss(this.syncFailedToast)
       this.syncFailedToast = this.$toast('Progress is not being synced. Restart playback', { timeout: false, type: 'error' })
+    },
+    sessionClosedEvent(sessionId) {
+      if (this.playerHandler.currentSessionId === sessionId) {
+        console.log('sessionClosedEvent closing current session', sessionId)
+        this.playerHandler.resetPlayer() // Closes player without reporting to server
+        this.$store.commit('setMediaPlaying', null)
+      }
     }
   },
   mounted() {

@@ -2,7 +2,7 @@
   <modals-modal v-model="show" name="opml-feeds-modal" :width="1000" :height="'unset'" :processing="processing">
     <template #outer>
       <div class="absolute top-0 left-0 p-5 w-2/3 overflow-hidden">
-        <p class="font-book text-3xl text-white truncate">{{ title }}</p>
+        <p class="text-3xl text-white truncate">{{ title }}</p>
       </div>
     </template>
     <div ref="wrapper" class="p-4 w-full text-sm py-2 rounded-lg bg-bg shadow-lg border border-black-300 relative overflow-hidden">
@@ -97,7 +97,7 @@ export default {
   },
   methods: {
     toFeedMetadata(feed) {
-      var metadata = feed.metadata
+      const metadata = feed.metadata
       return {
         title: metadata.title,
         author: metadata.author,
@@ -122,9 +122,9 @@ export default {
     },
     async submit() {
       this.processing = true
-      var newFeedPayloads = this.feedMetadata.map((metadata) => {
+      const newFeedPayloads = this.feedMetadata.map((metadata) => {
         return {
-          path: `${this.selectedFolderPath}\\${this.$sanitizeFilename(metadata.title)}`,
+          path: `${this.selectedFolderPath}/${this.$sanitizeFilename(metadata.title)}`,
           folderId: this.selectedFolderId,
           libraryId: this.currentLibrary.id,
           media: {

@@ -36,6 +36,10 @@
           <p v-else class="text-success text-base md:text-lg text-center">{{ $strings.MessageValidCronExpression }}</p>
         </div>
       </template>
+      <div v-if="cronExpression && isValid" class="flex items-center justify-center text-yellow-400 mt-2">
+        <span class="material-icons-outlined mr-2 text-xl">event</span>
+        <p>{{ $strings.LabelNextScheduledRun }}: {{ nextRun }}</p>
+      </div>
     </div>
   </div>
 </template>
@@ -63,12 +67,25 @@ export default {
       isValid: true
     }
   },
+  watch: {
+    value: {
+      immediate: true,
+      handler(newVal) {
+        this.init()
+      }
+    }
+  },
   computed: {
     minuteIsValid() {
       return !(isNaN(this.selectedMinute) || this.selectedMinute === '' || this.selectedMinute < 0 || this.selectedMinute > 59)
     },
     hourIsValid() {
       return !(isNaN(this.selectedHour) || this.selectedHour === '' || this.selectedHour < 0 || this.selectedHour > 23)
+    },
+    nextRun() {
+      if (!this.cronExpression) return ''
+      const parsed = this.$getNextScheduledDate(this.cronExpression)
+      return this.$formatJsDatetime(parsed, this.$store.state.serverSettings.dateFormat, this.$store.state.serverSettings.timeFormat) || ''
     },
     description() {
       if ((this.selectedInterval !== 'custom' || !this.selectedWeekdays.length) && this.selectedInterval !== 'daily') return ''
@@ -101,35 +118,35 @@ export default {
     intervalOptions() {
       return [
         {
-          text: 'Custom daily/weekly',
+          text: this.$strings.LabelIntervalCustomDailyWeekly,
           value: 'custom'
         },
         {
-          text: 'Every day',
+          text: this.$strings.LabelIntervalEveryDay,
           value: 'daily'
         },
         {
-          text: 'Every 12 hours',
+          text: this.$strings.LabelIntervalEvery12Hours,
           value: '0 */12 * * *'
         },
         {
-          text: 'Every 6 hours',
+          text: this.$strings.LabelIntervalEvery6Hours,
           value: '0 */6 * * *'
         },
         {
-          text: 'Every 2 hours',
+          text: this.$strings.LabelIntervalEvery2Hours,
           value: '0 */2 * * *'
         },
         {
-          text: 'Every hour',
+          text: this.$strings.LabelIntervalEveryHour,
           value: '0 * * * *'
         },
         {
-          text: 'Every 30 minutes',
+          text: this.$strings.LabelIntervalEvery30Minutes,
           value: '*/30 * * * *'
         },
         {
-          text: 'Every 15 minutes',
+          text: this.$strings.LabelIntervalEvery15Minutes,
           value: '*/15 * * * *'
         }
       ]
@@ -137,31 +154,31 @@ export default {
     weekdays() {
       return [
         {
-          text: this.$strings.WeekdaySunday,
+          text: this.$formatJsDate(new Date(2023, 0, 1), 'EEEE'),
           value: 0
         },
         {
-          text: this.$strings.WeekdayMonday,
+          text: this.$formatJsDate(new Date(2023, 0, 2), 'EEEE'),
           value: 1
         },
         {
-          text: this.$strings.WeekdayTuesday,
+          text: this.$formatJsDate(new Date(2023, 0, 3), 'EEEE'),
           value: 2
         },
         {
-          text: this.$strings.WeekdayWednesday,
+          text: this.$formatJsDate(new Date(2023, 0, 4), 'EEEE'),
           value: 3
         },
         {
-          text: this.$strings.WeekdayThursday,
+          text: this.$formatJsDate(new Date(2023, 0, 5), 'EEEE'),
           value: 4
         },
         {
-          text: this.$strings.WeekdayFriday,
+          text: this.$formatJsDate(new Date(2023, 0, 6), 'EEEE'),
           value: 5
         },
         {
-          text: this.$strings.WeekdaySaturday,
+          text: this.$formatJsDate(new Date(2023, 0, 7), 'EEEE'),
           value: 6
         }
       ]
@@ -271,6 +288,11 @@ export default {
         })
     },
     init() {
+      this.selectedInterval = 'custom'
+      this.selectedHour = 0
+      this.selectedMinute = 0
+      this.selectedWeekdays = []
+
       if (!this.value) return
       const pieces = this.value.split(' ')
       if (pieces.length !== 5) {

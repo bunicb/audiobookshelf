@@ -14,7 +14,7 @@ class SessionController {
       return res.sendStatus(404)
     }
 
-    var listeningSessions = []
+    let listeningSessions = []
     if (req.query.user) {
       listeningSessions = await this.getUserListeningSessionsHelper(req.query.user)
     } else {
@@ -40,6 +40,25 @@ class SessionController {
     }
 
     res.json(payload)
+  }
+
+  getOpenSessions(req, res) {
+    if (!req.user.isAdminOrUp) {
+      Logger.error(`[SessionController] getOpenSessions: Non-admin user requested open session data ${req.user.id}/"${req.user.username}"`)
+      return res.sendStatus(404)
+    }
+
+    const openSessions = this.playbackSessionManager.sessions.map(se => {
+      const user = this.db.users.find(u => u.id === se.userId) || null
+      return {
+        ...se.toJSON(),
+        user: user ? { id: user.id, username: user.username } : null
+      }
+    })
+
+    res.json({
+      sessions: openSessions
+    })
   }
 
   getOpenSession(req, res) {
@@ -75,6 +94,11 @@ class SessionController {
     this.playbackSessionManager.syncLocalSessionRequest(req.user, req.body, res)
   }
 
+  // POST: api/session/local-all
+  syncLocalSessions(req, res) {
+    this.playbackSessionManager.syncLocalSessionsRequest(req, res)
+  }
+
   openSessionMiddleware(req, res, next) {
     var playbackSession = this.playbackSessionManager.getSession(req.params.id)
     if (!playbackSession) return res.sendStatus(404)
@@ -89,8 +113,11 @@ class SessionController {
   }
 
   async middleware(req, res, next) {
-    var playbackSession = await this.db.getPlaybackSession(req.params.id)
-    if (!playbackSession) return res.sendStatus(404)
+    const playbackSession = await this.db.getPlaybackSession(req.params.id)
+    if (!playbackSession) {
+      Logger.error(`[SessionController] Unable to find playback session with id=${req.params.id}`)
+      return res.sendStatus(404)
+    }
 
     if (req.method == 'DELETE' && !req.user.canDelete) {
       Logger.warn(`[SessionController] User attempted to delete without permission`, req.user)

@@ -2,7 +2,7 @@
   <modals-modal v-model="show" name="new-podcast-modal" :width="1000" :height="'unset'" :processing="processing">
     <template #outer>
       <div class="absolute top-0 left-0 p-5 w-3/4 overflow-hidden">
-        <p class="font-book text-xl md:text-3xl text-white truncate">{{ title }}</p>
+        <p class="text-xl md:text-3xl text-white truncate">{{ title }}</p>
       </div>
     </template>
     <div ref="wrapper" id="podcast-wrapper" class="p-2 md:p-8 w-full text-sm py-2 rounded-lg bg-bg shadow-lg border border-black-300 relative overflow-x-hidden overflow-y-auto" style="max-height: 80vh">
@@ -26,6 +26,17 @@
           </div>
           <div class="w-full md:w-1/2 p-2">
             <ui-multi-select v-model="podcast.genres" :items="podcast.genres" :label="$strings.LabelGenres" />
+          </div>
+        </div>
+        <div class="flex flex-wrap">
+          <div class="md:w-1/4 p-2">
+            <ui-dropdown :label="$strings.LabelPodcastType" v-model="podcast.type" :items="podcastTypes" small />
+          </div>
+          <div class="md:w-1/4 p-2">
+            <ui-text-input-with-label v-model="podcast.language" :label="$strings.LabelLanguage" />
+          </div>
+          <div class="md:w-1/4 px-2 pt-7">
+            <ui-checkbox v-model="podcast.explicit" :label="$strings.LabelExplicit" checkbox-bg="primary" border-color="gray-600" label-class="pl-2 text-base font-semibold" />
           </div>
         </div>
         <div class="p-2 w-full">
@@ -82,7 +93,10 @@ export default {
         itunesPageUrl: '',
         itunesId: '',
         itunesArtistId: '',
-        autoDownloadEpisodes: false
+        autoDownloadEpisodes: false,
+        language: '',
+        explicit: false,
+        type: ''
       }
     }
   },
@@ -140,6 +154,9 @@ export default {
     selectedFolderPath() {
       if (!this.selectedFolder) return ''
       return this.selectedFolder.fullPath
+    },
+    podcastTypes() {
+      return this.$store.state.globals.podcastTypes || []
     }
   },
   methods: {
@@ -170,7 +187,9 @@ export default {
             itunesPageUrl: this.podcast.itunesPageUrl,
             itunesId: this.podcast.itunesId,
             itunesArtistId: this.podcast.itunesArtistId,
-            language: this.podcast.language
+            language: this.podcast.language,
+            explicit: this.podcast.explicit,
+            type: this.podcast.type
           },
           autoDownloadEpisodes: this.podcast.autoDownloadEpisodes
         }
@@ -205,9 +224,11 @@ export default {
       this.podcast.itunesPageUrl = this._podcastData.pageUrl || ''
       this.podcast.itunesId = this._podcastData.id || ''
       this.podcast.itunesArtistId = this._podcastData.artistId || ''
-      this.podcast.language = this._podcastData.language || ''
+      this.podcast.language = this._podcastData.language || this.feedMetadata.language || ''
       this.podcast.autoDownloadEpisodes = false
+      this.podcast.type = this._podcastData.type || this.feedMetadata.type || 'episodic'
 
+      this.podcast.explicit = this._podcastData.explicit || this.feedMetadata.explicit === 'yes' || this.feedMetadata.explicit == 'true'
       if (this.folderItems[0]) {
         this.selectedFolderId = this.folderItems[0].value
         this.folderUpdated()

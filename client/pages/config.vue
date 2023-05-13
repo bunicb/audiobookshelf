@@ -2,9 +2,9 @@
   <div id="page-wrapper" class="page p-2 md:p-6 overflow-y-auto relative" :class="streamLibraryItem ? 'streaming' : ''">
     <app-config-side-nav :is-open.sync="sideDrawerOpen" />
     <div class="configContent" :class="`page-${currentPage}`">
-      <div v-show="isMobile" class="w-full pb-4 px-2 flex border-b border-white border-opacity-10 mb-2">
-        <span class="material-icons cursor-pointer" @click.stop.prevent="showMore">more_vert</span>
-        <p class="pl-3 capitalize">{{ currentPage }}</p>
+      <div v-show="isMobilePortrait" class="w-full pb-4 px-2 flex border-b border-white border-opacity-10 mb-2 cursor-pointer" @click.stop.prevent="toggleShowMore">
+        <span class="material-icons text-2xl cursor-pointer">arrow_forward</span>
+        <p class="pl-3 capitalize">{{ $strings.HeaderSettings }}</p>
       </div>
       <nuxt-child />
     </div>
@@ -35,22 +35,33 @@ export default {
     }
   },
   computed: {
-    isMobile() {
-      return this.$store.state.globals.isMobile
+    isMobilePortrait() {
+      return this.$store.state.globals.isMobilePortrait
     },
     streamLibraryItem() {
       return this.$store.state.streamLibraryItem
     },
     currentPage() {
-      if (!this.$route.name) return 'Settings'
+      if (!this.$route.name) return this.$strings.HeaderSettings
       var routeName = this.$route.name.split('-')
-      if (routeName.length > 0) return routeName.slice(1).join('-')
-      return 'Settings'
+      if (routeName.length > 0) {
+        const pageName = routeName.slice(1).join('-')
+        if (pageName === 'log') return this.$strings.HeaderLogs
+        else if (pageName === 'backups') return this.$strings.HeaderBackups
+        else if (pageName === 'libraries') return this.$strings.HeaderLibraries
+        else if (pageName === 'notifications') return this.$strings.HeaderNotifications
+        else if (pageName === 'sessions') return this.$strings.HeaderListeningSessions
+        else if (pageName === 'stats') return this.$strings.HeaderYourStats
+        else if (pageName === 'library-stats') return this.$strings.HeaderLibraryStats
+        else if (pageName === 'users') return this.$strings.HeaderUsers
+        else if (pageName === 'item-metadata-utils') return this.$strings.HeaderItemMetadataUtils
+      }
+      return this.$strings.HeaderSettings
     }
   },
   methods: {
-    showMore() {
-      this.sideDrawerOpen = true
+    toggleShowMore() {
+      this.sideDrawerOpen = !this.sideDrawerOpen
     },
     setDeveloperMode() {
       var value = !this.$store.state.developerMode

@@ -1,6 +1,11 @@
-const Logger = require('../Logger')
-const { reqSupportsWebp } = require('../utils/index')
+
+const fs = require('../libs/fsExtra')
 const { createNewSortInstance } = require('../libs/fastSort')
+
+const Logger = require('../Logger')
+const SocketAuthority = require('../SocketAuthority')
+
+const { reqSupportsWebp } = require('../utils/index')
 
 const naturalSort = createNewSortInstance({
   comparer: new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare
@@ -60,76 +65,87 @@ class AuthorController {
   }
 
   async update(req, res) {
-    var payload = req.body
+    const payload = req.body
+    let hasUpdated = false
 
-    // If updating or removing cover image then clear cache
-    if (payload.imagePath !== undefined && req.author.imagePath && payload.imagePath !== req.author.imagePath) {
-      this.cacheManager.purgeImageCache(req.author.id)
-
-      if (!payload.imagePath) { // If removing image then remove file
-        var currentImagePath = req.author.imagePath
-        await this.coverManager.removeFile(currentImagePath)
+    // Updating/removing cover image
+    if (payload.imagePath !== undefined && payload.imagePath !== req.author.imagePath) {
+      if (!payload.imagePath && req.author.imagePath) { // If removing image then remove file
+        await this.cacheManager.purgeImageCache(req.author.id) // Purge cache
+        await this.coverManager.removeFile(req.author.imagePath)
       } else if (payload.imagePath.startsWith('http')) { // Check if image path is a url
-        var imageData = await this.authorFinder.saveAuthorImage(req.author.id, payload.imagePath)
+        const imageData = await this.authorFinder.saveAuthorImage(req.author.id, payload.imagePath)
         if (imageData) {
-          req.author.imagePath = imageData.path
-          req.author.relImagePath = imageData.relPath
-          hasUpdated = hasUpdated || true;
-        } else {
-          req.author.imagePath = null
-          req.author.relImagePath = null
+          if (req.author.imagePath) {
+            await this.cacheManager.purgeImageCache(req.author.id) // Purge cache
+          }
+          payload.imagePath = imageData.path
+          hasUpdated = true
+        }
+      } else if (payload.imagePath && payload.imagePath !== req.author.imagePath) { // Changing image path locally
+        if (!await fs.pathExists(payload.imagePath)) { // Make sure image path exists
+          Logger.error(`[AuthorController] Image path does not exist: "${payload.imagePath}"`)
+          return res.status(400).send('Author image path does not exist')
+        }
+
+        if (req.author.imagePath) {
+          await this.cacheManager.purgeImageCache(req.author.id) // Purge cache
         }
       }
     }
 
-    var authorNameUpdate = payload.name !== undefined && payload.name !== req.author.name
+    const authorNameUpdate = payload.name !== undefined && payload.name !== req.author.name
 
     // Check if author name matches another author and merge the authors
-    var existingAuthor = authorNameUpdate ? this.db.authors.find(au => au.id !== req.author.id && payload.name === au.name) : false
+    const existingAuthor = authorNameUpdate ? this.db.authors.find(au => au.id !== req.author.id && payload.name === au.name) : false
     if (existingAuthor) {
-      var itemsWithAuthor = this.db.libraryItems.filter(li => li.mediaType === 'book' && li.media.metadata.hasAuthor(req.author.id))
+      const itemsWithAuthor = this.db.libraryItems.filter(li => li.mediaType === 'book' && li.media.metadata.hasAuthor(req.author.id))
       itemsWithAuthor.forEach(libraryItem => { // Replace old author with merging author for each book
         libraryItem.media.metadata.replaceAuthor(req.author, existingAuthor)
       })
       if (itemsWithAuthor.length) {
         await this.db.updateLibraryItems(itemsWithAuthor)
-        this.emitter('items_updated', itemsWithAuthor.map(li => li.toJSONExpanded()))
+        SocketAuthority.emitter('items_updated', itemsWithAuthor.map(li => li.toJSONExpanded()))
       }
 
       // Remove old author
       await this.db.removeEntity('author', req.author.id)
-      this.emitter('author_removed', req.author.toJSON())
+      SocketAuthority.emitter('author_removed', req.author.toJSON())
 
       // Send updated num books for merged author
-      var numBooks = this.db.libraryItems.filter(li => {
+      const numBooks = this.db.libraryItems.filter(li => {
         return li.media.metadata.hasAuthor && li.media.metadata.hasAuthor(existingAuthor.id)
       }).length
-      this.emitter('author_updated', existingAuthor.toJSONExpanded(numBooks))
+      SocketAuthority.emitter('author_updated', existingAuthor.toJSONExpanded(numBooks))
 
       res.json({
         author: existingAuthor.toJSON(),
         merged: true
       })
     } else { // Regular author update
-      var hasUpdated = req.author.update(payload)
+      if (req.author.update(payload)) {
+        hasUpdated = true
+      }
 
       if (hasUpdated) {
+        req.author.updatedAt = Date.now()
+
         if (authorNameUpdate) { // Update author name on all books
-          var itemsWithAuthor = this.db.libraryItems.filter(li => li.mediaType === 'book' && li.media.metadata.hasAuthor(req.author.id))
+          const itemsWithAuthor = this.db.libraryItems.filter(li => li.mediaType === 'book' && li.media.metadata.hasAuthor(req.author.id))
           itemsWithAuthor.forEach(libraryItem => {
             libraryItem.media.metadata.updateAuthor(req.author)
           })
           if (itemsWithAuthor.length) {
             await this.db.updateLibraryItems(itemsWithAuthor)
-            this.emitter('items_updated', itemsWithAuthor.map(li => li.toJSONExpanded()))
+            SocketAuthority.emitter('items_updated', itemsWithAuthor.map(li => li.toJSONExpanded()))
           }
         }
 
         await this.db.updateEntity('author', req.author)
-        var numBooks = this.db.libraryItems.filter(li => {
+        const numBooks = this.db.libraryItems.filter(li => {
           return li.media.metadata.hasAuthor && li.media.metadata.hasAuthor(req.author.id)
         }).length
-        this.emitter('author_updated', req.author.toJSONExpanded(numBooks))
+        SocketAuthority.emitter('author_updated', req.author.toJSONExpanded(numBooks))
       }
 
       res.json({
@@ -145,22 +161,25 @@ class AuthorController {
     var limit = (req.query.limit && !isNaN(req.query.limit)) ? Number(req.query.limit) : 25
     var authors = this.db.authors.filter(au => au.name.toLowerCase().includes(q))
     authors = authors.slice(0, limit)
-    res.json(authors)
+    res.json({
+      results: authors
+    })
   }
 
   async match(req, res) {
-    var authorData = null
+    let authorData = null
+    const region = req.body.region || 'us'
     if (req.body.asin) {
-      authorData = await this.authorFinder.findAuthorByASIN(req.body.asin)
+      authorData = await this.authorFinder.findAuthorByASIN(req.body.asin, region)
     } else {
-      authorData = await this.authorFinder.findAuthorByName(req.body.q)
+      authorData = await this.authorFinder.findAuthorByName(req.body.q, region)
     }
     if (!authorData) {
       return res.status(404).send('Author not found')
     }
     Logger.debug(`[AuthorController] match author with "${req.body.q || req.body.asin}"`, authorData)
 
-    var hasUpdates = false
+    let hasUpdates = false
     if (authorData.asin && req.author.asin !== authorData.asin) {
       req.author.asin = authorData.asin
       hasUpdates = true
@@ -170,10 +189,9 @@ class AuthorController {
     if (authorData.image && (!req.author.imagePath || hasUpdates)) {
       this.cacheManager.purgeImageCache(req.author.id)
 
-      var imageData = await this.authorFinder.saveAuthorImage(req.author.id, authorData.image)
+      const imageData = await this.authorFinder.saveAuthorImage(req.author.id, authorData.image)
       if (imageData) {
         req.author.imagePath = imageData.path
-        req.author.relImagePath = imageData.relPath
         hasUpdates = true
       }
     }
@@ -187,10 +205,10 @@ class AuthorController {
       req.author.updatedAt = Date.now()
 
       await this.db.updateEntity('author', req.author)
-      var numBooks = this.db.libraryItems.filter(li => {
+      const numBooks = this.db.libraryItems.filter(li => {
         return li.media.metadata.hasAuthor && li.media.metadata.hasAuthor(req.author.id)
       }).length
-      this.emitter('author_updated', req.author.toJSONExpanded(numBooks))
+      SocketAuthority.emitter('author_updated', req.author.toJSONExpanded(numBooks))
     }
 
     res.json({
@@ -201,7 +219,15 @@ class AuthorController {
 
   // GET api/authors/:id/image
   async getImage(req, res) {
-    let { query: { width, height, format }, author } = req
+    const { query: { width, height, format, raw }, author } = req
+
+    if (raw) { // any value
+      if (!author.imagePath || !await fs.pathExists(author.imagePath)) {
+        return res.sendStatus(404)
+      }
+
+      return res.sendFile(author.imagePath)
+    }
 
     const options = {
       format: format || (reqSupportsWebp(req) ? 'webp' : 'jpeg'),

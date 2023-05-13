@@ -55,7 +55,7 @@ class PlaybackSession {
       libraryItemId: this.libraryItemId,
       episodeId: this.episodeId,
       mediaType: this.mediaType,
-      mediaMetadata: this.mediaMetadata ? this.mediaMetadata.toJSON() : null,
+      mediaMetadata: this.mediaMetadata?.toJSON() || null,
       chapters: (this.chapters || []).map(c => ({ ...c })),
       displayTitle: this.displayTitle,
       displayAuthor: this.displayAuthor,
@@ -63,7 +63,7 @@ class PlaybackSession {
       duration: this.duration,
       playMethod: this.playMethod,
       mediaPlayer: this.mediaPlayer,
-      deviceInfo: this.deviceInfo ? this.deviceInfo.toJSON() : null,
+      deviceInfo: this.deviceInfo?.toJSON() || null,
       date: this.date,
       dayOfWeek: this.dayOfWeek,
       timeListening: this.timeListening,
@@ -82,7 +82,7 @@ class PlaybackSession {
       libraryItemId: this.libraryItemId,
       episodeId: this.episodeId,
       mediaType: this.mediaType,
-      mediaMetadata: this.mediaMetadata ? this.mediaMetadata.toJSON() : null,
+      mediaMetadata: this.mediaMetadata?.toJSON() || null,
       chapters: (this.chapters || []).map(c => ({ ...c })),
       displayTitle: this.displayTitle,
       displayAuthor: this.displayAuthor,
@@ -90,7 +90,7 @@ class PlaybackSession {
       duration: this.duration,
       playMethod: this.playMethod,
       mediaPlayer: this.mediaPlayer,
-      deviceInfo: this.deviceInfo ? this.deviceInfo.toJSON() : null,
+      deviceInfo: this.deviceInfo?.toJSON() || null,
       date: this.date,
       dayOfWeek: this.dayOfWeek,
       timeListening: this.timeListening,
@@ -141,9 +141,32 @@ class PlaybackSession {
     this.updatedAt = session.updatedAt || null
   }
 
+  get mediaItemId() {
+    if (this.episodeId) return `${this.libraryItemId}-${this.episodeId}`
+    return this.libraryItemId
+  }
+
   get progress() { // Value between 0 and 1
     if (!this.duration) return 0
     return Math.max(0, Math.min(this.currentTime / this.duration, 1))
+  }
+
+  get deviceId() {
+    return this.deviceInfo?.deviceId
+  }
+
+  get deviceDescription() {
+    if (!this.deviceInfo) return 'No Device Info'
+    return this.deviceInfo.deviceDescription
+  }
+
+  get mediaProgressObject() {
+    return {
+      duration: this.duration,
+      currentTime: this.currentTime,
+      progress: this.progress,
+      lastUpdate: this.updatedAt
+    }
   }
 
   setData(libraryItem, user, mediaPlayer, deviceInfo, startTime, episodeId = null) {

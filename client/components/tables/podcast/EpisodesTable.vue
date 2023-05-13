@@ -1,8 +1,9 @@
 <template>
   <div class="w-full py-6">
+    <p class="text-lg mb-2 font-semibold md:hidden">{{ $strings.HeaderEpisodes }}</p>
     <div class="flex items-center mb-4">
-      <p class="text-lg mb-0 font-semibold">{{ $strings.HeaderEpisodes }}</p>
-      <div class="flex-grow" />
+      <p class="text-lg mb-0 font-semibold hidden md:block">{{ $strings.HeaderEpisodes }}</p>
+      <div class="flex-grow hidden md:block" />
       <template v-if="isSelectionMode">
         <ui-tooltip :text="selectedIsFinished ? $strings.MessageMarkAsNotFinished : $strings.MessageMarkAsFinished" direction="bottom">
           <ui-read-icon-btn :disabled="processing" :is-read="selectedIsFinished" @click="toggleBatchFinished" class="mx-1.5" />
@@ -11,13 +12,20 @@
         <ui-btn :disabled="processing" small class="ml-2 h-9" @click="clearSelected">{{ $strings.ButtonCancel }}</ui-btn>
       </template>
       <template v-else>
-        <controls-filter-select v-model="filterKey" :items="filterItems" class="w-32 md:w-36 h-9 ml-1 sm:ml-4" />
-        <controls-sort-select v-model="sortKey" :descending.sync="sortDesc" :items="sortItems" class="w-32 sm:w-44 md:w-48 h-9 ml-1 sm:ml-4" />
+        <controls-filter-select v-model="filterKey" :items="filterItems" class="w-36 h-9 sm:ml-4" />
+        <controls-sort-select v-model="sortKey" :descending.sync="sortDesc" :items="sortItems" class="w-44 md:w-48 h-9 ml-1 sm:ml-4" />
+        <div class="flex-grow md:hidden" />
+        <ui-context-menu-dropdown v-if="contextMenuItems.length" :items="contextMenuItems" class="ml-1" @action="contextMenuAction" />
       </template>
     </div>
     <p v-if="!episodes.length" class="py-4 text-center text-lg">{{ $strings.MessageNoEpisodes }}</p>
-    <template v-for="episode in episodesSorted">
-      <tables-podcast-episode-table-row ref="episodeRow" :key="episode.id" :episode="episode" :library-item-id="libraryItem.id" :selection-mode="isSelectionMode" class="item" @play="playEpisode" @remove="removeEpisode" @edit="editEpisode" @view="viewEpisode" @selected="episodeSelected" @addToQueue="addEpisodeToQueue" />
+    <div v-if="episodes.length" class="w-full py-3 mx-auto flex">
+      <form @submit.prevent="submit" class="flex flex-grow">
+        <ui-text-input v-model="search" @input="inputUpdate" type="search" :placeholder="$strings.PlaceholderSearchEpisode" class="flex-grow mr-2 text-sm md:text-base" />
+      </form>
+    </div>
+    <template v-for="episode in episodesList">
+      <tables-podcast-episode-table-row ref="episodeRow" :key="episode.id" :episode="episode" :library-item-id="libraryItem.id" :selection-mode="isSelectionMode" class="item" @play="playEpisode" @remove="removeEpisode" @edit="editEpisode" @view="viewEpisode" @selected="episodeSelected" @addToQueue="addEpisodeToQueue" @addToPlaylist="addToPlaylist" />
     </template>
 
     <modals-podcast-remove-episode v-model="showPodcastRemoveModal" @input="removeEpisodeModalToggled" :library-item="libraryItem" :episodes="episodesToRemove" @clearSelected="clearSelected" />
@@ -42,15 +50,30 @@ export default {
       showPodcastRemoveModal: false,
       selectedEpisodes: [],
       episodesToRemove: [],
-      processing: false
+      processing: false,
+      quickMatchingEpisodes: false,
+      search: null,
+      searchTimeout: null,
+      searchText: null
     }
   },
   watch: {
-    libraryItem() {
-      this.init()
+    libraryItem: {
+      handler() {
+        this.init()
+      }
     }
   },
   computed: {
+    contextMenuItems() {
+      if (!this.userIsAdminOrUp) return []
+      return [
+        {
+          text: 'Quick match all episodes',
+          action: 'quick-match-episodes'
+        }
+      ]
+    },
     sortItems() {
       return [
         {
@@ -94,8 +117,8 @@ export default {
     isSelectionMode() {
       return this.selectedEpisodes.length > 0
     },
-    userCanUpdate() {
-      return this.$store.getters['user/getUserCanUpdate']
+    userIsAdminOrUp() {
+      return this.$store.getters['user/getIsAdminOrUp']
     },
     media() {
       return this.libraryItem.media || {}
@@ -116,11 +139,26 @@ export default {
           return episodeProgress && !episodeProgress.isFinished
         })
         .sort((a, b) => {
-          if (this.sortDesc) {
-            return String(b[this.sortKey]).localeCompare(String(a[this.sortKey]), undefined, { numeric: true, sensitivity: 'base' })
+          let aValue = a[this.sortKey]
+          let bValue = b[this.sortKey]
+
+          // Sort episodes with no pub date as the oldest
+          if (this.sortKey === 'publishedAt') {
+            if (!aValue) aValue = Number.MAX_VALUE
+            if (!bValue) bValue = Number.MAX_VALUE
           }
-          return String(a[this.sortKey]).localeCompare(String(b[this.sortKey]), undefined, { numeric: true, sensitivity: 'base' })
+
+          if (this.sortDesc) {
+            return String(bValue).localeCompare(String(aValue), undefined, { numeric: true, sensitivity: 'base' })
+          }
+          return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
         })
+    },
+    episodesList() {
+      return this.episodesSorted.filter((episode) => {
+        if (!this.searchText) return true
+        return (episode.title && episode.title.toLowerCase().includes(this.searchText)) || (episode.subtitle && episode.subtitle.toLowerCase().includes(this.searchText))
+      })
     },
     selectedIsFinished() {
       // Find an item that is not finished, if none then all items finished
@@ -128,9 +166,67 @@ export default {
         var itemProgress = this.$store.getters['user/getUserMediaProgress'](this.libraryItem.id, episode.id)
         return !itemProgress || !itemProgress.isFinished
       })
+    },
+    dateFormat() {
+      return this.$store.state.serverSettings.dateFormat
+    },
+    timeFormat() {
+      return this.$store.state.serverSettings.timeFormat
     }
   },
   methods: {
+    inputUpdate() {
+      clearTimeout(this.searchTimeout)
+      this.searchTimeout = setTimeout(() => {
+        if (!this.search || !this.search.trim()) {
+          this.searchText = ''
+          return
+        }
+        this.searchText = this.search.toLowerCase().trim()
+      }, 500)
+    },
+    contextMenuAction(action) {
+      if (action === 'quick-match-episodes') {
+        if (this.quickMatchingEpisodes) return
+
+        this.quickMatchAllEpisodes()
+      }
+    },
+    quickMatchAllEpisodes() {
+      if (!this.mediaMetadata.feedUrl) {
+        this.$toast.error(this.$strings.MessagePodcastHasNoRSSFeedForMatching)
+        return
+      }
+      this.quickMatchingEpisodes = true
+
+      const payload = {
+        message: 'Quick matching episodes will overwrite details if a match is found. Only unmatched episodes will be updated. Are you sure?',
+        callback: (confirmed) => {
+          if (confirmed) {
+            this.$axios
+              .$post(`/api/podcasts/${this.libraryItem.id}/match-episodes?override=1`)
+              .then((data) => {
+                if (data.numEpisodesUpdated) {
+                  this.$toast.success(`${data.numEpisodesUpdated} episodes updated`)
+                } else {
+                  this.$toast.info('No changes were made')
+                }
+              })
+              .catch((error) => {
+                console.error('Failed to request match episodes', error)
+                this.$toast.error('Failed to match episodes')
+              })
+          }
+          this.quickMatchingEpisodes = false
+        },
+        type: 'yesNo'
+      }
+      this.$store.commit('globals/setConfirmPrompt', payload)
+    },
+    addToPlaylist(episode) {
+      this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem, episode }])
+      this.$store.commit('globals/setShowPlaylistsModal', true)
+    },
     addEpisodeToQueue(episode) {
       const queueItem = {
         libraryItemId: this.libraryItem.id,
@@ -138,7 +234,7 @@ export default {
         episodeId: episode.id,
         title: episode.title,
         subtitle: this.mediaMetadata.title,
-        caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+        caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
         duration: episode.audioFile.duration || null,
         coverPath: this.media.coverPath || null
       }
@@ -206,7 +302,7 @@ export default {
             episodeId: episode.id,
             title: episode.title,
             subtitle: this.mediaMetadata.title,
-            caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+            caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
             duration: episode.audioFile.duration || null,
             coverPath: this.media.coverPath || null
           })
@@ -224,6 +320,8 @@ export default {
       this.showPodcastRemoveModal = true
     },
     editEpisode(episode) {
+      const episodeIds = this.episodesSorted.map((e) => e.id)
+      this.$store.commit('setEpisodeTableEpisodeIds', episodeIds)
       this.$store.commit('setSelectedLibraryItem', this.libraryItem)
       this.$store.commit('globals/setSelectedEpisode', episode)
       this.$store.commit('globals/setShowEditPodcastEpisodeModal', true)

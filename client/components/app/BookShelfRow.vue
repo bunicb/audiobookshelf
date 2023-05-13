@@ -41,10 +41,15 @@
             <cards-author-card :key="entity.id" :width="bookCoverWidth / 1.25" :height="bookCoverWidth" :author="entity" :size-multiplier="sizeMultiplier" @hook:updated="updatedBookCard" class="pb-6 mx-2" @edit="editAuthor" />
           </template>
         </div>
+        <div v-if="shelf.type === 'narrators'" class="flex items-center">
+          <template v-for="entity in shelf.entities">
+            <cards-narrator-card :key="entity.name" :width="150" :height="100" :narrator="entity" :size-multiplier="sizeMultiplier" @hook:updated="updatedBookCard" class="pb-6 mx-2" />
+          </template>
+        </div>
       </div>
     </div>
 
-    <div class="absolute text-center categoryPlacard font-book transform z-30 bottom-px left-4 md:left-8 w-44 rounded-md" style="height: 22px">
+    <div class="absolute text-center categoryPlacard transform z-30 bottom-px left-4 md:left-8 w-44 rounded-md" style="height: 22px">
       <div class="w-full h-full shinyBlack flex items-center justify-center rounded-sm border">
         <p class="transform text-sm">{{ $strings[shelf.labelStringKey] }}</p>
       </div>
@@ -88,6 +93,7 @@ export default {
       return this.bookCoverWidth * this.bookCoverAspectRatio
     },
     shelfHeight() {
+      if (this.shelf.type === 'narrators') return 148
       return this.bookCoverHeight + 48
     },
     paddingLeft() {
@@ -98,7 +104,7 @@ export default {
       return this.$store.state.libraries.currentLibraryId
     },
     isSelectionMode() {
-      return this.$store.getters['getNumLibraryItemsSelected'] > 0
+      return this.$store.getters['globals/getIsBatchSelectingMediaItems']
     }
   },
   methods: {
@@ -119,14 +125,14 @@ export default {
       this.$store.commit('globals/setShowEditPodcastEpisodeModal', true)
     },
     updateSelectionMode(val) {
-      var selectedLibraryItems = this.$store.state.selectedLibraryItems
+      const selectedMediaItems = this.$store.state.globals.selectedMediaItems
       if (this.shelf.type === 'book' || this.shelf.type === 'podcast') {
         this.shelf.entities.forEach((ent) => {
           var component = this.$refs[`shelf-book-${ent.id}`]
           if (!component || !component.length) return
           component = component[0]
           component.setSelectionMode(val)
-          component.selected = selectedLibraryItems.includes(ent.id)
+          component.selected = selectedMediaItems.some((i) => i.id === ent.id)
         })
       } else if (this.shelf.type === 'episode') {
         this.shelf.entities.forEach((ent) => {
@@ -134,7 +140,7 @@ export default {
           if (!component || !component.length) return
           component = component[0]
           component.setSelectionMode(val)
-          component.selected = selectedLibraryItems.includes(ent.id)
+          component.selected = selectedMediaItems.some((i) => i.id === ent.id)
         })
       }
     },

@@ -73,7 +73,8 @@ function tryGrabChannelLayout(stream) {
 function tryGrabTags(stream, ...tags) {
   if (!stream.tags) return null
   for (let i = 0; i < tags.length; i++) {
-    var value = stream.tags[tags[i]] || stream.tags[tags[i].toUpperCase()]
+    const tagKey = Object.keys(stream.tags).find(t => t.toLowerCase() === tags[i].toLowerCase())
+    const value = stream.tags[tagKey]
     if (value && value.trim()) return value.trim()
   }
   return null
@@ -161,15 +162,19 @@ function parseTags(format, verbose) {
   if (verbose) {
     Logger.debug('Tags', format.tags)
   }
+
   const tags = {
     file_tag_encoder: tryGrabTags(format, 'encoder', 'tsse', 'tss'),
     file_tag_encodedby: tryGrabTags(format, 'encoded_by', 'tenc', 'ten'),
     file_tag_title: tryGrabTags(format, 'title', 'tit2', 'tt2'),
+    file_tag_titlesort: tryGrabTags(format, 'title-sort', 'tsot'),
     file_tag_subtitle: tryGrabTags(format, 'subtitle', 'tit3', 'tt3'),
     file_tag_track: tryGrabTags(format, 'track', 'trck', 'trk'),
-    file_tag_disc: tryGrabTags(format, 'discnumber', 'disc', 'disk', 'tpos'),
+    file_tag_disc: tryGrabTags(format, 'discnumber', 'disc', 'disk', 'tpos', 'tpa'),
     file_tag_album: tryGrabTags(format, 'album', 'talb', 'tal'),
+    file_tag_albumsort: tryGrabTags(format, 'album-sort', 'tsoa'),
     file_tag_artist: tryGrabTags(format, 'artist', 'tpe1', 'tp1'),
+    file_tag_artistsort: tryGrabTags(format, 'artist-sort', 'tsop'),
     file_tag_albumartist: tryGrabTags(format, 'albumartist', 'album_artist', 'tpe2'),
     file_tag_date: tryGrabTags(format, 'date', 'tyer', 'tye'),
     file_tag_composer: tryGrabTags(format, 'composer', 'tcom', 'tcm'),
@@ -177,11 +182,23 @@ function parseTags(format, verbose) {
     file_tag_comment: tryGrabTags(format, 'comment', 'comm', 'com'),
     file_tag_description: tryGrabTags(format, 'description', 'desc'),
     file_tag_genre: tryGrabTags(format, 'genre', 'tcon', 'tco'),
-    file_tag_series: tryGrabTags(format, 'series', 'show', 'mvin'),
-    file_tag_seriespart: tryGrabTags(format, 'series-part', 'episode_id', 'mvnm'),
-    file_tag_isbn: tryGrabTags(format, 'isbn'),
+    file_tag_series: tryGrabTags(format, 'series', 'show', 'mvnm'),
+    file_tag_seriespart: tryGrabTags(format, 'series-part', 'episode_id', 'mvin', 'part'),
+    file_tag_isbn: tryGrabTags(format, 'isbn'), // custom
     file_tag_language: tryGrabTags(format, 'language', 'lang'),
-    file_tag_asin: tryGrabTags(format, 'asin'),
+    file_tag_asin: tryGrabTags(format, 'asin', 'audible_asin'), // custom
+    file_tag_itunesid: tryGrabTags(format, 'itunes-id'), // custom
+    file_tag_podcasttype: tryGrabTags(format, 'podcast-type'), // custom
+    file_tag_episodetype: tryGrabTags(format, 'episode-type'), // custom
+    file_tag_originalyear: tryGrabTags(format, 'originalyear'),
+    file_tag_releasecountry: tryGrabTags(format, 'MusicBrainz Album Release Country', 'releasecountry'),
+    file_tag_releasestatus: tryGrabTags(format, 'MusicBrainz Album Status', 'releasestatus', 'musicbrainz_albumstatus'),
+    file_tag_releasetype: tryGrabTags(format, 'MusicBrainz Album Type', 'releasetype', 'musicbrainz_albumtype'),
+    file_tag_isrc: tryGrabTags(format, 'tsrc', 'isrc'),
+    file_tag_musicbrainz_trackid: tryGrabTags(format, 'MusicBrainz Release Track Id', 'musicbrainz_releasetrackid'),
+    file_tag_musicbrainz_albumid: tryGrabTags(format, 'MusicBrainz Album Id', 'musicbrainz_albumid'),
+    file_tag_musicbrainz_albumartistid: tryGrabTags(format, 'MusicBrainz Album Artist Id', 'musicbrainz_albumartistid'),
+    file_tag_musicbrainz_artistid: tryGrabTags(format, 'MusicBrainz Artist Id', 'musicbrainz_artistid'),
 
     // Not sure if these are actually used yet or not
     file_tag_creation_time: tryGrabTags(format, 'creation_time'),
@@ -213,20 +230,18 @@ function getDefaultAudioStream(audioStreams) {
 
 function parseProbeData(data, verbose = false) {
   try {
-    var { format, streams, chapters } = data
+    const { format, streams, chapters } = data
 
-    var sizeBytes = !isNaN(format.size) ? Number(format.size) : null
-    var sizeMb = sizeBytes !== null ? Number((sizeBytes / (1024 * 1024)).toFixed(2)) : null
+    const sizeBytes = !isNaN(format.size) ? Number(format.size) : null
+    const sizeMb = sizeBytes !== null ? Number((sizeBytes / (1024 * 1024)).toFixed(2)) : null
 
-    // Logger.debug('Parsing Data for', Path.basename(format.filename))
-    var tags = parseTags(format, verbose)
-    var cleanedData = {
+    let cleanedData = {
       format: format.format_long_name || format.name || 'Unknown',
       duration: !isNaN(format.duration) ? Number(format.duration) : null,
       size: sizeBytes,
       sizeMb,
       bit_rate: !isNaN(format.bit_rate) ? Number(format.bit_rate) : null,
-      ...tags
+      tags: parseTags(format, verbose)
     }
     if (verbose && format.tags) {
       cleanedData.rawTags = format.tags
@@ -234,11 +249,11 @@ function parseProbeData(data, verbose = false) {
 
     const cleaned_streams = streams.map(s => parseMediaStreamInfo(s, streams, cleanedData.bit_rate))
     cleanedData.video_stream = cleaned_streams.find(s => s.type === 'video')
-    var audioStreams = cleaned_streams.filter(s => s.type === 'audio')
+    const audioStreams = cleaned_streams.filter(s => s.type === 'audio')
     cleanedData.audio_stream = getDefaultAudioStream(audioStreams)
 
     if (cleanedData.audio_stream && cleanedData.video_stream) {
-      var videoBitrate = cleanedData.video_stream.bit_rate
+      const videoBitrate = cleanedData.video_stream.bit_rate
       // If audio stream bitrate larger then video, most likely incorrect
       if (cleanedData.audio_stream.bit_rate > videoBitrate) {
         cleanedData.video_stream.bit_rate = cleanedData.bit_rate
@@ -247,10 +262,9 @@ function parseProbeData(data, verbose = false) {
 
     // If format does not have tags, check audio stream (https://github.com/advplyr/audiobookshelf/issues/256)
     if (!format.tags && cleanedData.audio_stream && cleanedData.audio_stream.tags) {
-      var tags = parseTags(cleanedData.audio_stream)
       cleanedData = {
         ...cleanedData,
-        ...tags
+        tags: parseTags(cleanedData.audio_stream, verbose)
       }
     }
 
@@ -277,13 +291,13 @@ function probe(filepath, verbose = false) {
         }
       }
 
-      var rawProbeData = parseProbeData(raw, verbose)
+      const rawProbeData = parseProbeData(raw, verbose)
       if (!rawProbeData || (!rawProbeData.audio_stream && !rawProbeData.video_stream)) {
         return {
           error: rawProbeData ? 'Invalid media file: no audio or video streams found' : 'Probe Failed'
         }
       } else {
-        var probeData = new MediaProbeData()
+        const probeData = new MediaProbeData()
         probeData.setData(rawProbeData)
         return probeData
       }

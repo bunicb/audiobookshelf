@@ -16,8 +16,6 @@ class ServerSettings {
     this.scannerPreferMatchedMetadata = false
     this.scannerDisableWatcher = false
     this.scannerPreferOverdriveMediaMarker = false
-    this.scannerUseSingleThreadedProber = true
-    this.scannerMaxThreads = 0 // Currently not being used
     this.scannerUseTone = false
 
     // Metadata - choose to store inside users library item folder
@@ -39,7 +37,7 @@ class ServerSettings {
     this.loggerScannerLogsToKeep = 2
 
     // Bookshelf Display
-    this.homeBookshelfView = BookshelfView.STANDARD
+    this.homeBookshelfView = BookshelfView.DETAIL
     this.bookshelfView = BookshelfView.DETAIL
 
     // Podcasts
@@ -53,6 +51,7 @@ class ServerSettings {
     this.chromecastEnabled = false
     this.enableEReader = false
     this.dateFormat = 'MM/dd/yyyy'
+    this.timeFormat = 'HH:mm'
     this.language = 'en-us'
 
     this.logLevel = Logger.logLevel
@@ -74,11 +73,6 @@ class ServerSettings {
     this.scannerPreferMatchedMetadata = !!settings.scannerPreferMatchedMetadata
     this.scannerDisableWatcher = !!settings.scannerDisableWatcher
     this.scannerPreferOverdriveMediaMarker = !!settings.scannerPreferOverdriveMediaMarker
-    this.scannerUseSingleThreadedProber = !!settings.scannerUseSingleThreadedProber
-    if (settings.scannerUseSingleThreadedProber === undefined) { // Default to original scanner
-      this.scannerUseSingleThreadedProber = true
-    }
-    this.scannerMaxThreads = isNullOrNaN(settings.scannerMaxThreads) ? 0 : Number(settings.scannerMaxThreads)
     this.scannerUseTone = !!settings.scannerUseTone
 
     this.storeCoverWithItem = !!settings.storeCoverWithItem
@@ -103,6 +97,7 @@ class ServerSettings {
     this.chromecastEnabled = !!settings.chromecastEnabled
     this.enableEReader = !!settings.enableEReader
     this.dateFormat = settings.dateFormat || 'MM/dd/yyyy'
+    this.timeFormat = settings.timeFormat || 'HH:mm'
     this.language = settings.language || 'en-us'
     this.logLevel = settings.logLevel || Logger.logLevel
     this.version = settings.version || null
@@ -135,8 +130,6 @@ class ServerSettings {
       scannerPreferMatchedMetadata: this.scannerPreferMatchedMetadata,
       scannerDisableWatcher: this.scannerDisableWatcher,
       scannerPreferOverdriveMediaMarker: this.scannerPreferOverdriveMediaMarker,
-      scannerUseSingleThreadedProber: this.scannerUseSingleThreadedProber,
-      scannerMaxThreads: this.scannerMaxThreads,
       scannerUseTone: this.scannerUseTone,
       storeCoverWithItem: this.storeCoverWithItem,
       storeMetadataWithItem: this.storeMetadataWithItem,
@@ -155,6 +148,7 @@ class ServerSettings {
       chromecastEnabled: this.chromecastEnabled,
       enableEReader: this.enableEReader,
       dateFormat: this.dateFormat,
+      timeFormat: this.timeFormat,
       language: this.language,
       logLevel: this.logLevel,
       version: this.version

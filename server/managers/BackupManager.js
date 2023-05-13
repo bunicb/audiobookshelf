@@ -1,4 +1,6 @@
 const Path = require('path')
+const Logger = require('../Logger')
+const SocketAuthority = require('../SocketAuthority')
 
 const cron = require('../libs/nodeCron')
 const fs = require('../libs/fsExtra')
@@ -8,18 +10,16 @@ const StreamZip = require('../libs/nodeStreamZip')
 // Utils
 const { getFileSize } = require('../utils/fileUtils')
 const filePerms = require('../utils/filePerms')
-const Logger = require('../Logger')
 
 const Backup = require('../objects/Backup')
 
 class BackupManager {
-  constructor(db, emitter) {
+  constructor(db) {
     this.BackupPath = Path.join(global.MetadataPath, 'backups')
     this.ItemsMetadataPath = Path.join(global.MetadataPath, 'items')
     this.AuthorsMetadataPath = Path.join(global.MetadataPath, 'authors')
 
     this.db = db
-    this.emitter = emitter
 
     this.scheduleTask = null
 
@@ -106,13 +106,20 @@ class BackupManager {
       this.backups.push(backup)
     }
 
-    return res.json(this.backups.map(b => b.toJSON()))
+    res.json({
+      backups: this.backups.map(b => b.toJSON())
+    })
   }
 
   async requestCreateBackup(res) {
     var backupSuccess = await this.runBackup()
-    if (backupSuccess) res.json(this.backups.map(b => b.toJSON()))
-    else res.sendStatus(500)
+    if (backupSuccess) {
+      res.json({
+        backups: this.backups.map(b => b.toJSON())
+      })
+    } else {
+      res.sendStatus(500)
+    }
   }
 
   async requestApplyBackup(backup) {
@@ -123,16 +130,17 @@ class BackupManager {
       await zip.extract('metadata-authors/', this.AuthorsMetadataPath)
     }
     await this.db.reinit()
-    this.emitter('backup_applied')
+    SocketAuthority.emitter('backup_applied')
   }
 
   async loadBackups() {
     try {
-      var filesInDir = await fs.readdir(this.BackupPath)
+      const filesInDir = await fs.readdir(this.BackupPath)
+
       for (let i = 0; i < filesInDir.length; i++) {
-        var filename = filesInDir[i]
+        const filename = filesInDir[i]
         if (filename.endsWith('.audiobookshelf')) {
-          var fullFilePath = Path.join(this.BackupPath, filename)
+          const fullFilePath = Path.join(this.BackupPath, filename)
 
           let zip = null
           let data = null
@@ -140,27 +148,21 @@ class BackupManager {
             zip = new StreamZip.async({ file: fullFilePath })
             data = await zip.entryData('details')
           } catch (error) {
-            if (error.message === "Bad archive") {
-              Logger.warn(`[BackupManager] Backup appears to be corrupted: ${fullFilePath}`)
-              continue;
-            } else if (error.message === "unexpected end of file") {
-              Logger.warn(`[BackupManager] Backup appears to be corrupted: ${fullFilePath}`)
-              continue;
-            } else {
-              throw error
-            }
+            Logger.error(`[BackupManager] Failed to unzip backup "${fullFilePath}"`, error)
+            await zip.close()
+            continue
           }
 
-          var details = data.toString('utf8').split('\n')
+          const details = data.toString('utf8').split('\n')
 
-          var backup = new Backup({ details, fullPath: fullFilePath })
+          const backup = new Backup({ details, fullPath: fullFilePath })
 
           if (!backup.serverVersion) {
             Logger.error(`[BackupManager] Old unsupported backup was found "${backup.fullPath}"`)
           }
 
           backup.fileSize = await getFileSize(backup.fullPath)
-          var existingBackupWithId = this.backups.find(b => b.id === backup.id)
+          const existingBackupWithId = this.backups.find(b => b.id === backup.id)
           if (existingBackupWithId) {
             Logger.warn(`[BackupManager] Backup already loaded with id ${backup.id} - ignoring`)
           } else {
@@ -168,7 +170,7 @@ class BackupManager {
           }
 
           Logger.debug(`[BackupManager] Backup found "${backup.id}"`)
-          zip.close()
+          await zip.close()
         }
       }
       Logger.info(`[BackupManager] ${this.backups.length} Backups Found`)
@@ -293,14 +295,16 @@ class BackupManager {
       // pipe archive data to the file
       archive.pipe(output)
 
-      archive.directory(this.db.LibraryItemsPath, 'config/libraryItems')
-      archive.directory(this.db.UsersPath, 'config/users')
-      archive.directory(this.db.SessionsPath, 'config/sessions')
-      archive.directory(this.db.LibrariesPath, 'config/libraries')
-      archive.directory(this.db.SettingsPath, 'config/settings')
-      archive.directory(this.db.CollectionsPath, 'config/collections')
-      archive.directory(this.db.AuthorsPath, 'config/authors')
-      archive.directory(this.db.SeriesPath, 'config/series')
+      archive.directory(Path.join(this.db.LibraryItemsPath, 'data'), 'config/libraryItems/data')
+      archive.directory(Path.join(this.db.UsersPath, 'data'), 'config/users/data')
+      archive.directory(Path.join(this.db.SessionsPath, 'data'), 'config/sessions/data')
+      archive.directory(Path.join(this.db.LibrariesPath, 'data'), 'config/libraries/data')
+      archive.directory(Path.join(this.db.SettingsPath, 'data'), 'config/settings/data')
+      archive.directory(Path.join(this.db.CollectionsPath, 'data'), 'config/collections/data')
+      archive.directory(Path.join(this.db.AuthorsPath, 'data'), 'config/authors/data')
+      archive.directory(Path.join(this.db.SeriesPath, 'data'), 'config/series/data')
+      archive.directory(Path.join(this.db.PlaylistsPath, 'data'), 'config/playlists/data')
+      archive.directory(Path.join(this.db.FeedsPath, 'data'), 'config/feeds/data')
 
       if (this.serverSettings.backupMetadataCovers) {
         Logger.debug(`[BackupManager] Backing up Metadata Items "${this.ItemsMetadataPath}"`)

@@ -18,10 +18,9 @@ class User {
     this.seriesHideFromContinueListening = [] // Series IDs that should not show on home page continue listening
     this.bookmarks = []
 
-    this.settings = {}
     this.permissions = {}
     this.librariesAccessible = [] // Library IDs (Empty if ALL libraries)
-    this.itemTagsAccessible = [] // Empty if ALL item tags accessible
+    this.itemTagsSelected = [] // Empty if ALL item tags accessible
 
     if (user) {
       this.construct(user)
@@ -59,20 +58,6 @@ class User {
     return !!this.pash && !!this.pash.length
   }
 
-  getDefaultUserSettings() {
-    return {
-      mobileOrderBy: 'recent',
-      mobileOrderDesc: true,
-      mobileFilterBy: 'all',
-      orderBy: 'media.metadata.title',
-      orderDesc: false,
-      filterBy: 'all',
-      playbackRate: 1,
-      bookshelfCoverSize: 120,
-      collapseSeries: false
-    }
-  }
-
   getDefaultUserPermissions() {
     return {
       download: true,
@@ -99,19 +84,18 @@ class User {
       isLocked: this.isLocked,
       lastSeen: this.lastSeen,
       createdAt: this.createdAt,
-      settings: this.settings,
       permissions: this.permissions,
       librariesAccessible: [...this.librariesAccessible],
-      itemTagsAccessible: [...this.itemTagsAccessible]
+      itemTagsSelected: [...this.itemTagsSelected]
     }
   }
 
-  toJSONForBrowser() {
-    return {
+  toJSONForBrowser(hideRootToken = false, minimal = false) {
+    const json = {
       id: this.id,
       username: this.username,
       type: this.type,
-      token: this.token,
+      token: (this.type === 'root' && hideRootToken) ? '' : this.token,
       mediaProgress: this.mediaProgress ? this.mediaProgress.map(li => li.toJSON()) : [],
       seriesHideFromContinueListening: [...this.seriesHideFromContinueListening],
       bookmarks: this.bookmarks ? this.bookmarks.map(b => b.toJSON()) : [],
@@ -119,11 +103,15 @@ class User {
       isLocked: this.isLocked,
       lastSeen: this.lastSeen,
       createdAt: this.createdAt,
-      settings: this.settings,
       permissions: this.permissions,
       librariesAccessible: [...this.librariesAccessible],
-      itemTagsAccessible: [...this.itemTagsAccessible]
+      itemTagsSelected: [...this.itemTagsSelected]
     }
+    if (minimal) {
+      delete json.mediaProgress
+      delete json.bookmarks
+    }
+    return json
   }
 
   // Data broadcasted
@@ -171,7 +159,6 @@ class User {
     this.isLocked = user.type === 'root' ? false : !!user.isLocked
     this.lastSeen = user.lastSeen || null
     this.createdAt = user.createdAt || Date.now()
-    this.settings = user.settings || this.getDefaultUserSettings()
     this.permissions = user.permissions || this.getDefaultUserPermissions()
     // Upload permission added v1.1.13, make sure root user has upload permissions
     if (this.type === 'root' && !this.permissions.upload) this.permissions.upload = true
@@ -182,9 +169,14 @@ class User {
     if (this.permissions.accessAllTags === undefined) this.permissions.accessAllTags = true
     // Explicit content restriction permission added v2.0.18
     if (this.permissions.accessExplicitContent === undefined) this.permissions.accessExplicitContent = true
+    // itemTagsAccessible was renamed to itemTagsSelected in version v2.2.20
+    if (user.itemTagsAccessible?.length) {
+      this.permissions.selectedTagsNotAccessible = false
+      user.itemTagsSelected = user.itemTagsAccessible
+    }
 
     this.librariesAccessible = [...(user.librariesAccessible || [])]
-    this.itemTagsAccessible = [...(user.itemTagsAccessible || [])]
+    this.itemTagsSelected = [...(user.itemTagsSelected || [])]
   }
 
   update(payload) {
@@ -241,19 +233,21 @@ class User {
     // Update accessible tags
     if (this.permissions.accessAllTags) {
       // Access all tags
-      if (this.itemTagsAccessible.length) {
-        this.itemTagsAccessible = []
+      if (this.itemTagsSelected.length) {
+        this.itemTagsSelected = []
+        this.permissions.selectedTagsNotAccessible = false
         hasUpdates = true
       }
-    } else if (payload.itemTagsAccessible !== undefined) {
-      if (payload.itemTagsAccessible.length) {
-        if (payload.itemTagsAccessible.join(',') !== this.itemTagsAccessible.join(',')) {
+    } else if (payload.itemTagsSelected !== undefined) {
+      if (payload.itemTagsSelected.length) {
+        if (payload.itemTagsSelected.join(',') !== this.itemTagsSelected.join(',')) {
           hasUpdates = true
-          this.itemTagsAccessible = [...payload.itemTagsAccessible]
+          this.itemTagsSelected = [...payload.itemTagsSelected]
         }
-      } else if (this.itemTagsAccessible.length > 0) {
+      } else if (this.itemTagsSelected.length > 0) {
         hasUpdates = true
-        this.itemTagsAccessible = []
+        this.itemTagsSelected = []
+        this.permissions.selectedTagsNotAccessible = false
       }
     }
     return hasUpdates
@@ -319,18 +313,18 @@ class User {
   }
 
   createUpdateMediaProgress(libraryItem, updatePayload, episodeId = null) {
-    var itemProgress = this.mediaProgress.find(li => {
+    const itemProgress = this.mediaProgress.find(li => {
       if (episodeId && li.episodeId !== episodeId) return false
       return li.libraryItemId === libraryItem.id
     })
     if (!itemProgress) {
-      var newItemProgress = new MediaProgress()
+      const newItemProgress = new MediaProgress()
 
       newItemProgress.setData(libraryItem.id, updatePayload, episodeId)
       this.mediaProgress.push(newItemProgress)
       return true
     }
-    var wasUpdated = itemProgress.update(updatePayload)
+    const wasUpdated = itemProgress.update(updatePayload)
 
     if (updatePayload.lastUpdate) itemProgress.lastUpdate = updatePayload.lastUpdate // For local to keep update times in sync
     return wasUpdated
@@ -348,32 +342,6 @@ class User {
     return true
   }
 
-  // Returns Boolean If update was made
-  updateSettings(settings) {
-    if (!this.settings) {
-      this.settings = { ...settings }
-      return true
-    }
-    var madeUpdates = false
-
-    for (const key in this.settings) {
-      if (settings[key] !== undefined && this.settings[key] !== settings[key]) {
-        this.settings[key] = settings[key]
-        madeUpdates = true
-      }
-    }
-
-    // Check if new settings update has keys not currently in user settings
-    for (const key in settings) {
-      if (settings[key] !== undefined && this.settings[key] === undefined) {
-        this.settings[key] = settings[key]
-        madeUpdates = true
-      }
-    }
-
-    return madeUpdates
-  }
-
   checkCanAccessLibrary(libraryId) {
     if (this.permissions.accessAllLibraries) return true
     if (!this.librariesAccessible) return false
@@ -382,8 +350,12 @@ class User {
 
   checkCanAccessLibraryItemWithTags(tags) {
     if (this.permissions.accessAllTags) return true
-    if (!tags || !tags.length) return false
-    return this.itemTagsAccessible.some(tag => tags.includes(tag))
+    if (this.permissions.selectedTagsNotAccessible) {
+      if (!tags?.length) return true
+      return tags.every(tag => !this.itemTagsSelected.includes(tag))
+    }
+    if (!tags?.length) return false
+    return this.itemTagsSelected.some(tag => tags.includes(tag))
   }
 
   checkCanAccessLibraryItem(libraryItem) {
@@ -431,6 +403,12 @@ class User {
   addSeriesToHideFromContinueListening(seriesId) {
     if (this.seriesHideFromContinueListening.includes(seriesId)) return false
     this.seriesHideFromContinueListening.push(seriesId)
+    return true
+  }
+
+  removeSeriesFromHideFromContinueListening(seriesId) {
+    if (!this.seriesHideFromContinueListening.includes(seriesId)) return false
+    this.seriesHideFromContinueListening = this.seriesHideFromContinueListening.filter(sid => sid !== seriesId)
     return true
   }
 

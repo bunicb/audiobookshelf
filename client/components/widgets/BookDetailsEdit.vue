@@ -50,7 +50,7 @@
       </div>
 
       <div class="flex flex-wrap mt-2 -mx-1">
-        <div class="w-full md:w-1/2 px-1">
+        <div class="w-full md:w-1/4 px-1">
           <ui-text-input-with-label ref="publisherInput" v-model="details.publisher" :label="$strings.LabelPublisher" />
         </div>
         <div class="w-1/2 md:w-1/4 px-1 mt-2 md:mt-0">
@@ -59,6 +59,11 @@
         <div class="flex-grow px-1 pt-6 mt-2 md:mt-0">
           <div class="flex justify-center">
             <ui-checkbox v-model="details.explicit" :label="$strings.LabelExplicit" checkbox-bg="primary" border-color="gray-600" label-class="pl-2 text-base font-semibold" />
+          </div>
+        </div>
+        <div class="flex-grow px-1 pt-6 mt-2 md:mt-0">
+          <div class="flex justify-center">
+            <ui-checkbox v-model="details.abridged" :label="$strings.LabelAbridged" checkbox-bg="primary" border-color="gray-600" label-class="pl-2 text-base font-semibold" />
           </div>
         </div>
       </div>
@@ -89,7 +94,8 @@ export default {
         isbn: null,
         asin: null,
         genres: [],
-        explicit: false
+        explicit: false,
+        abridged: false
       },
       newTags: []
     }
@@ -137,16 +143,33 @@ export default {
         author: (this.details.authors || []).map((au) => au.name).join(', ')
       }
     },
-    mapBatchDetails(batchDetails) {
+    mapBatchDetails(batchDetails, mapType = 'overwrite') {
       for (const key in batchDetails) {
-        if (key === 'tags') {
-          this.newTags = [...batchDetails.tags]
-        } else if (key === 'genres' || key === 'narrators') {
-          this.details[key] = [...batchDetails[key]]
-        } else if (key === 'authors' || key === 'series') {
-          this.details[key] = batchDetails[key].map((i) => ({ ...i }))
+        if (mapType === 'append') {
+          if (key === 'tags') {
+            // Concat and remove dupes
+            this.newTags = [...new Set(this.newTags.concat(batchDetails.tags))]
+          } else if (key === 'genres' || key === 'narrators') {
+            // Concat and remove dupes
+            this.details[key] = [...new Set(this.details[key].concat(batchDetails[key]))]
+          } else if (key === 'authors' || key === 'series') {
+            batchDetails[key].forEach((detail) => {
+              const existingDetail = this.details[key].find((_d) => _d.name.toLowerCase() == detail.name.toLowerCase().trim() || _d.id == detail.id)
+              if (!existingDetail) {
+                this.details[key].push({ ...detail })
+              }
+            })
+          }
         } else {
-          this.details[key] = batchDetails[key]
+          if (key === 'tags') {
+            this.newTags = [...batchDetails.tags]
+          } else if (key === 'genres' || key === 'narrators') {
+            this.details[key] = [...batchDetails[key]]
+          } else if (key === 'authors' || key === 'series') {
+            this.details[key] = batchDetails[key].map((i) => ({ ...i }))
+          } else {
+            this.details[key] = batchDetails[key]
+          }
         }
       }
     },
@@ -193,11 +216,13 @@ export default {
       // array of objects with id key
       if (array1.length !== array2.length) return false
 
-      for (var item of array1) {
-        var matchingItem = array2.find((a) => a.id === item.id)
-        if (!matchingItem) return false
-        for (var key in item) {
-          if (item[key] !== matchingItem[key]) {
+      for (let i = 0; i < array1.length; i++) {
+        const item1 = array1[i]
+        const item2 = array2[i]
+        if (!item1 || !item2) return false
+
+        for (const key in item1) {
+          if (item1[key] !== item2[key]) {
             // console.log('Object array item keys changed', key, item[key], matchingItem[key])
             return false
           }
@@ -252,6 +277,7 @@ export default {
       this.details.isbn = this.mediaMetadata.isbn || null
       this.details.asin = this.mediaMetadata.asin || null
       this.details.explicit = !!this.mediaMetadata.explicit
+      this.details.abridged = !!this.mediaMetadata.abridged
       this.newTags = [...(this.media.tags || [])]
     },
     submitForm() {

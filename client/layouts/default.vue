@@ -11,11 +11,14 @@
 
     <modals-item-edit-modal />
     <modals-collections-add-create-modal />
-    <modals-edit-collection-modal />
+    <modals-collections-edit-modal />
+    <modals-playlists-add-create-modal />
+    <modals-playlists-edit-modal />
     <modals-podcast-edit-episode />
     <modals-podcast-view-episode />
     <modals-authors-edit-modal />
     <modals-batch-quick-match-model />
+    <modals-rssfeed-open-close-modal />
     <prompt-confirm />
     <readers-reader />
   </div>
@@ -40,9 +43,8 @@ export default {
       if (this.$store.state.showEditModal) {
         this.$store.commit('setShowEditModal', false)
       }
-      if (this.$store.state.selectedLibraryItems) {
-        this.$store.commit('setSelectedLibraryItems', [])
-      }
+
+      this.$store.commit('globals/resetSelectedMediaItems', [])
       this.updateBodyClass()
     }
   },
@@ -53,9 +55,12 @@ export default {
     isCasting() {
       return this.$store.state.globals.isCasting
     },
+    currentLibraryId() {
+      return this.$store.state.libraries.currentLibraryId
+    },
     isShowingSideRail() {
       if (!this.$route.name) return false
-      return !this.$route.name.startsWith('config') && this.$store.state.libraries.currentLibraryId
+      return !this.$route.name.startsWith('config') && this.currentLibraryId
     },
     isShowingToolbar() {
       return this.isShowingSideRail && this.$route.name !== 'upload' && this.$route.name !== 'account'
@@ -87,19 +92,19 @@ export default {
       this.socket.emit('auth', token)
 
       if (!this.isFirstSocketConnection || this.socketConnectionToastId !== null) {
-        this.updateSocketConnectionToast('Socket Connected', 'success', 5000)
+        this.updateSocketConnectionToast(this.$strings.ToastSocketConnected, 'success', 5000)
       }
       this.isFirstSocketConnection = false
       this.isSocketConnected = true
     },
     connectError() {
       console.error('[SOCKET] connect error')
-      this.updateSocketConnectionToast('Socket Failed to Connect', 'error', null)
+      this.updateSocketConnectionToast(this.$strings.ToastSocketFailedToConnect, 'error', null)
     },
     disconnect() {
       console.log('[SOCKET] Disconnected')
       this.isSocketConnected = false
-      this.updateSocketConnectionToast('Socket Disconnected', 'error', null)
+      this.updateSocketConnectionToast(this.$strings.ToastSocketDisconnected, 'error', null)
     },
     reconnect() {
       console.error('[SOCKET] reconnected')
@@ -132,14 +137,8 @@ export default {
         }
       })
 
-      if (payload.backups && payload.backups.length) {
-        this.$store.commit('setBackups', payload.backups)
-      }
       if (payload.usersOnline) {
-        this.$store.commit('users/resetUsers')
-        payload.usersOnline.forEach((user) => {
-          this.$store.commit('users/updateUser', user)
-        })
+        this.$store.commit('users/setUsersOnline', payload.usersOnline)
       }
 
       this.$eventBus.$emit('socket_init')
@@ -174,7 +173,7 @@ export default {
       this.$store.commit('libraries/remove', library)
 
       // When removed currently selected library then set next accessible library
-      const currLibraryId = this.$store.state.libraries.currentLibraryId
+      const currLibraryId = this.currentLibraryId
       if (currLibraryId === library.id) {
         var nextLibrary = this.$store.getters['libraries/getNextAccessibleLibrary']
         if (nextLibrary) {
@@ -213,7 +212,7 @@ export default {
     libraryItemRemoved(item) {
       if (this.$route.name.startsWith('item')) {
         if (this.$route.params.id === item.id) {
-          this.$router.replace(`/library/${this.$store.state.libraries.currentLibraryId}`)
+          this.$router.replace(`/library/${this.currentLibraryId}`)
         }
       }
     },
@@ -279,43 +278,73 @@ export default {
       console.log('Task finished', task)
       this.$store.commit('tasks/addUpdateTask', task)
     },
+    metadataEmbedQueueUpdate(data) {
+      if (data.queued) {
+        this.$store.commit('tasks/addQueuedEmbedLId', data.libraryItemId)
+      } else {
+        this.$store.commit('tasks/removeQueuedEmbedLId', data.libraryItemId)
+      }
+    },
     userUpdated(user) {
       if (this.$store.state.user.user.id === user.id) {
         this.$store.commit('user/setUser', user)
-        this.$store.commit('user/setSettings', user.settings)
       }
     },
     userOnline(user) {
-      this.$store.commit('users/updateUser', user)
+      this.$store.commit('users/updateUserOnline', user)
     },
     userOffline(user) {
-      this.$store.commit('users/removeUser', user)
+      this.$store.commit('users/removeUserOnline', user)
     },
     userStreamUpdate(user) {
-      this.$store.commit('users/updateUser', user)
+      this.$store.commit('users/updateUserOnline', user)
+    },
+    userSessionClosed(sessionId) {
+      if (this.$refs.streamContainer) this.$refs.streamContainer.sessionClosedEvent(sessionId)
     },
     userMediaProgressUpdate(payload) {
       this.$store.commit('user/updateMediaProgress', payload)
+
+      if (payload.data) {
+        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId)) {
+          // TODO: Update currently open session if being played from another device
+        }
+      }
     },
     collectionAdded(collection) {
+      if (this.currentLibraryId !== collection.libraryId) return
       this.$store.commit('libraries/addUpdateCollection', collection)
     },
     collectionUpdated(collection) {
+      if (this.currentLibraryId !== collection.libraryId) return
       this.$store.commit('libraries/addUpdateCollection', collection)
     },
     collectionRemoved(collection) {
+      if (this.currentLibraryId !== collection.libraryId) return
       if (this.$route.name.startsWith('collection')) {
         if (this.$route.params.id === collection.id) {
-          this.$router.replace(`/library/${this.$store.state.libraries.currentLibraryId}/bookshelf/collections`)
+          this.$router.replace(`/library/${this.currentLibraryId}/bookshelf/collections`)
         }
       }
       this.$store.commit('libraries/removeCollection', collection)
     },
-    rssFeedOpen(data) {
-      this.$store.commit('feeds/addFeed', data)
+    playlistAdded(playlist) {
+      if (playlist.userId !== this.user.id || this.currentLibraryId !== playlist.libraryId) return
+      this.$store.commit('libraries/addUpdateUserPlaylist', playlist)
     },
-    rssFeedClosed(data) {
-      this.$store.commit('feeds/removeFeed', data)
+    playlistUpdated(playlist) {
+      if (playlist.userId !== this.user.id || this.currentLibraryId !== playlist.libraryId) return
+      this.$store.commit('libraries/addUpdateUserPlaylist', playlist)
+    },
+    playlistRemoved(playlist) {
+      if (playlist.userId !== this.user.id || this.currentLibraryId !== playlist.libraryId) return
+
+      if (this.$route.name.startsWith('playlist')) {
+        if (this.$route.params.id === playlist.id) {
+          this.$router.replace(`/library/${this.currentLibraryId}/bookshelf/playlists`)
+        }
+      }
+      this.$store.commit('libraries/removeUserPlaylist', playlist)
     },
     backupApplied() {
       // Force refresh
@@ -333,6 +362,9 @@ export default {
         this.$toast.info(toast)
       }
     },
+    adminMessageEvt(message) {
+      this.$toast.info(message)
+    },
     initializeSocket() {
       this.socket = this.$nuxtSocket({
         name: process.env.NODE_ENV === 'development' ? 'dev' : 'prod',
@@ -345,6 +377,7 @@ export default {
       this.$root.socket = this.socket
       console.log('Socket initialized')
 
+      // Pre-defined socket events
       this.socket.on('connect', this.connect)
       this.socket.on('connect_error', this.connectError)
       this.socket.on('disconnect', this.disconnect)
@@ -353,6 +386,7 @@ export default {
       this.socket.io.on('reconnect_error', this.reconnectError)
       this.socket.io.on('reconnect_failed', this.reconnectFailed)
 
+      // Event received after authorizing socket
       this.socket.on('init', this.init)
 
       // Stream Listeners
@@ -380,12 +414,18 @@ export default {
       this.socket.on('user_online', this.userOnline)
       this.socket.on('user_offline', this.userOffline)
       this.socket.on('user_stream_update', this.userStreamUpdate)
+      this.socket.on('user_session_closed', this.userSessionClosed)
       this.socket.on('user_item_progress_updated', this.userMediaProgressUpdate)
 
-      // User Collection Listeners
+      // Collection Listeners
       this.socket.on('collection_added', this.collectionAdded)
       this.socket.on('collection_updated', this.collectionUpdated)
       this.socket.on('collection_removed', this.collectionRemoved)
+
+      // User Playlist Listeners
+      this.socket.on('playlist_added', this.playlistAdded)
+      this.socket.on('playlist_updated', this.playlistUpdated)
+      this.socket.on('playlist_removed', this.playlistRemoved)
 
       // Scan Listeners
       this.socket.on('scan_start', this.scanStart)
@@ -395,14 +435,13 @@ export default {
       // Task Listeners
       this.socket.on('task_started', this.taskStarted)
       this.socket.on('task_finished', this.taskFinished)
-
-      // Feed Listeners
-      this.socket.on('rss_feed_open', this.rssFeedOpen)
-      this.socket.on('rss_feed_closed', this.rssFeedClosed)
+      this.socket.on('metadata_embed_queue_update', this.metadataEmbedQueueUpdate)
 
       this.socket.on('backup_applied', this.backupApplied)
 
       this.socket.on('batch_quickmatch_complete', this.batchQuickMatchComplete)
+
+      this.socket.on('admin_message', this.adminMessageEvt)
     },
     showUpdateToast(versionData) {
       var ignoreVersion = localStorage.getItem('ignoreVersion')
@@ -472,9 +511,9 @@ export default {
       }
 
       // Batch selecting
-      if (this.$store.getters['getNumLibraryItemsSelected'] && name === 'Escape') {
+      if (this.$store.getters['globals/getIsBatchSelectingMediaItems'] && name === 'Escape') {
         // ESCAPE key cancels batch selection
-        this.$store.commit('setSelectedLibraryItems', [])
+        this.$store.commit('globals/resetSelectedMediaItems', [])
         this.$eventBus.$emit('bookshelf_clear_selection')
         e.preventDefault()
         return
@@ -510,11 +549,17 @@ export default {
     },
     loadTasks() {
       this.$axios
-        .$get('/api/tasks')
+        .$get('/api/tasks?include=queue')
         .then((payload) => {
           console.log('Fetched tasks', payload)
           if (payload.tasks) {
             this.$store.commit('tasks/setTasks', payload.tasks)
+          }
+          if (payload.queuedTaskData?.embedMetadata?.length) {
+            this.$store.commit(
+              'tasks/setQueuedEmbedLIds',
+              payload.queuedTaskData.embedMetadata.map((td) => td.libraryItemId)
+            )
           }
         })
         .catch((error) => {
@@ -524,6 +569,7 @@ export default {
     changeLanguage(code) {
       console.log('Changed lang', code)
       this.currentLang = code
+      document.documentElement.lang = code
     }
   },
   beforeMount() {
@@ -547,6 +593,11 @@ export default {
     if (this.$route.query.error) {
       this.$toast.error(this.$route.query.error)
       this.$router.replace(this.$route.path)
+    }
+
+    // Set lang on HTML tag
+    if (this.$languageCodes?.current) {
+      document.documentElement.lang = this.$languageCodes.current
     }
   },
   beforeDestroy() {

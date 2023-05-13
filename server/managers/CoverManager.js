@@ -1,13 +1,12 @@
 const fs = require('../libs/fsExtra')
 const Path = require('path')
-const axios = require('axios')
 const Logger = require('../Logger')
 const readChunk = require('../libs/readChunk')
 const imageType = require('../libs/imageType')
 const filePerms = require('../utils/filePerms')
 
 const globals = require('../utils/globals')
-const { downloadFile } = require('../utils/fileUtils')
+const { downloadFile, filePathToPOSIX } = require('../utils/fileUtils')
 const { extractCoverArt } = require('../utils/ffmpegHelpers')
 
 class CoverManager {
@@ -19,7 +18,7 @@ class CoverManager {
   }
 
   getCoverDirectory(libraryItem) {
-    if (this.db.serverSettings.storeCoverWithItem && !libraryItem.isFile) {
+    if (this.db.serverSettings.storeCoverWithItem && !libraryItem.isFile && !libraryItem.isMusic) {
       return libraryItem.path
     } else {
       return Path.posix.join(this.ItemMetadataPath, libraryItem.id)
@@ -55,7 +54,7 @@ class CoverManager {
     for (let i = 0; i < filesInDir.length; i++) {
       var file = filesInDir[i]
       var _extname = Path.extname(file).toLowerCase()
-      var _filename = Path.basename(file, _extname)
+      var _filename = Path.basename(file, _extname).toLowerCase()
       if (_filename === 'cover' && _extname !== newCoverExt && imageExtensions.includes(_extname)) {
         var filepath = Path.join(dirpath, file)
         Logger.debug(`[CoverManager] Removing old cover from metadata "${filepath}"`)
@@ -84,20 +83,20 @@ class CoverManager {
   }
 
   async uploadCover(libraryItem, coverFile) {
-    var extname = Path.extname(coverFile.name.toLowerCase())
+    const extname = Path.extname(coverFile.name.toLowerCase())
     if (!extname || !globals.SupportedImageTypes.includes(extname.slice(1))) {
       return {
         error: `Invalid image type ${extname} (Supported: ${globals.SupportedImageTypes.join(',')})`
       }
     }
 
-    var coverDirPath = this.getCoverDirectory(libraryItem)
+    const coverDirPath = this.getCoverDirectory(libraryItem)
     await fs.ensureDir(coverDirPath)
 
-    var coverFullPath = Path.posix.join(coverDirPath, `cover${extname}`)
+    const coverFullPath = Path.posix.join(coverDirPath, `cover${extname}`)
 
     // Move cover from temp upload dir to destination
-    var success = await coverFile.mv(coverFullPath).then(() => true).catch((error) => {
+    const success = await coverFile.mv(coverFullPath).then(() => true).catch((error) => {
       Logger.error('[CoverManager] Failed to move cover file', path, error)
       return false
     })
@@ -173,7 +172,7 @@ class CoverManager {
         error: 'Invalid cover path'
       }
     }
-    coverPath = coverPath.replace(/\\/g, '/')
+    coverPath = filePathToPOSIX(coverPath)
     // Cover path already set on media
     if (libraryItem.media.coverPath == coverPath) {
       Logger.debug(`[CoverManager] validate cover path already set "${coverPath}"`)
@@ -230,27 +229,30 @@ class CoverManager {
   }
 
   async saveEmbeddedCoverArt(libraryItem) {
-    var audioFileWithCover = null
-    if (libraryItem.mediaType === 'book') audioFileWithCover = libraryItem.media.audioFiles.find(af => af.embeddedCoverArt)
-    else {
-      var episodeWithCover = libraryItem.media.episodes.find(ep => ep.audioFile.embeddedCoverArt)
+    let audioFileWithCover = null
+    if (libraryItem.mediaType === 'book') {
+      audioFileWithCover = libraryItem.media.audioFiles.find(af => af.embeddedCoverArt)
+    } else if (libraryItem.mediaType == 'podcast') {
+      const episodeWithCover = libraryItem.media.episodes.find(ep => ep.audioFile.embeddedCoverArt)
       if (episodeWithCover) audioFileWithCover = episodeWithCover.audioFile
+    } else if (libraryItem.mediaType === 'music') {
+      audioFileWithCover = libraryItem.media.audioFile
     }
     if (!audioFileWithCover) return false
 
-    var coverDirPath = this.getCoverDirectory(libraryItem)
+    const coverDirPath = this.getCoverDirectory(libraryItem)
     await fs.ensureDir(coverDirPath)
 
-    var coverFilename = audioFileWithCover.embeddedCoverArt === 'png' ? 'cover.png' : 'cover.jpg'
-    var coverFilePath = Path.join(coverDirPath, coverFilename)
+    const coverFilename = audioFileWithCover.embeddedCoverArt === 'png' ? 'cover.png' : 'cover.jpg'
+    const coverFilePath = Path.join(coverDirPath, coverFilename)
 
-    var coverAlreadyExists = await fs.pathExists(coverFilePath)
+    const coverAlreadyExists = await fs.pathExists(coverFilePath)
     if (coverAlreadyExists) {
       Logger.warn(`[CoverManager] Extract embedded cover art but cover already exists for "${libraryItem.media.metadata.title}" - bail`)
       return false
     }
 
-    var success = await extractCoverArt(audioFileWithCover.metadata.path, coverFilePath)
+    const success = await extractCoverArt(audioFileWithCover.metadata.path, coverFilePath)
     if (success) {
       await filePerms.setDefault(coverFilePath)
 

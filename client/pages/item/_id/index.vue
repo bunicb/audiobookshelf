@@ -1,8 +1,8 @@
 <template>
   <div id="page-wrapper" class="bg-bg page overflow-hidden" :class="streamLibraryItem ? 'streaming' : ''">
-    <div class="w-full h-full overflow-y-auto px-2 py-6 md:p-8">
-      <div class="flex flex-col md:flex-row max-w-6xl mx-auto">
-        <div class="w-full flex justify-center md:block md:w-52" style="min-width: 208px">
+    <div class="w-full h-full overflow-y-auto px-2 py-6 lg:p-8">
+      <div class="flex flex-col lg:flex-row max-w-6xl mx-auto">
+        <div class="w-full flex justify-center lg:block lg:w-52" style="min-width: 208px">
           <div class="relative" style="height: fit-content">
             <covers-book-cover :library-item="libraryItem" :width="bookCoverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
 
@@ -21,11 +21,15 @@
             </div>
           </div>
         </div>
-        <div class="flex-grow px-2 py-6 md:py-0 md:px-10">
+        <div class="flex-grow px-2 py-6 lg:py-0 md:px-10">
           <div class="flex justify-center">
             <div class="mb-4">
               <h1 class="text-2xl md:text-3xl font-semibold">
-                {{ title }}
+                <div class="flex items-center">
+                  {{ title }}
+                  <widgets-explicit-indicator :explicit="isExplicit" />
+                  <widgets-abridged-indicator v-if="isAbridged" />
+                </div>
               </h1>
 
               <p v-if="bookSubtitle" class="text-gray-200 text-xl md:text-2xl">{{ bookSubtitle }}</p>
@@ -34,58 +38,16 @@
 
               <template v-if="!isVideo">
                 <p v-if="isPodcast" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl">by {{ podcastAuthor || 'Unknown' }}</p>
-                <p v-else-if="authors.length" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl">
+                <p v-else-if="musicArtists.length" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl max-w-[calc(100vw-2rem)] overflow-hidden overflow-ellipsis">
+                  <nuxt-link v-for="(artist, index) in musicArtists" :key="index" :to="`/artist/${$encode(artist)}`" class="hover:underline">{{ artist }}<span v-if="index < musicArtists.length - 1">,&nbsp;</span></nuxt-link>
+                </p>
+                <p v-else-if="authors.length" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl max-w-[calc(100vw-2rem)] overflow-hidden overflow-ellipsis">
                   by <nuxt-link v-for="(author, index) in authors" :key="index" :to="`/author/${author.id}`" class="hover:underline">{{ author.name }}<span v-if="index < authors.length - 1">,&nbsp;</span></nuxt-link>
                 </p>
                 <p v-else class="mb-2 mt-0.5 text-gray-200 text-xl">by Unknown</p>
               </template>
 
-              <div v-if="narrator" class="flex py-0.5 mt-4">
-                <div class="w-32">
-                  <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelNarrators }}</span>
-                </div>
-                <div>
-                  <template v-for="(narrator, index) in narrators">
-                    <nuxt-link :key="narrator" :to="`/library/${libraryId}/bookshelf?filter=narrators.${$encode(narrator)}`" class="hover:underline">{{ narrator }}</nuxt-link
-                    ><span :key="index" v-if="index < narrators.length - 1">,&nbsp;</span>
-                  </template>
-                </div>
-              </div>
-              <div v-if="publishedYear" class="flex py-0.5">
-                <div class="w-32">
-                  <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelPublishYear }}</span>
-                </div>
-                <div>
-                  {{ publishedYear }}
-                </div>
-              </div>
-              <div class="flex py-0.5" v-if="genres.length">
-                <div class="w-32">
-                  <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelGenres }}</span>
-                </div>
-                <div>
-                  <template v-for="(genre, index) in genres">
-                    <nuxt-link :key="genre" :to="`/library/${libraryId}/bookshelf?filter=genres.${$encode(genre)}`" class="hover:underline">{{ genre }}</nuxt-link
-                    ><span :key="index" v-if="index < genres.length - 1">,&nbsp;</span>
-                  </template>
-                </div>
-              </div>
-              <div v-if="tracks.length" class="flex py-0.5">
-                <div class="w-32">
-                  <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelDuration }}</span>
-                </div>
-                <div>
-                  {{ durationPretty }}
-                </div>
-              </div>
-              <div class="flex py-0.5">
-                <div class="w-32">
-                  <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelSize }}</span>
-                </div>
-                <div>
-                  {{ sizePretty }}
-                </div>
-              </div>
+              <content-library-item-details :library-item="libraryItem" />
             </div>
             <div class="hidden md:block flex-grow" />
           </div>
@@ -118,7 +80,7 @@
           <div v-if="!isPodcast && progressPercent > 0" class="px-4 py-2 mt-4 bg-primary text-sm font-semibold rounded-md text-gray-100 relative max-w-max mx-auto md:mx-0" :class="resettingProgress ? 'opacity-25' : ''">
             <p v-if="progressPercent < 1" class="leading-6">{{ $strings.LabelYourProgress }}: {{ Math.round(progressPercent * 100) }}%</p>
             <p v-else class="text-xs">{{ $strings.LabelFinished }} {{ $formatDate(userProgressFinishedAt, dateFormat) }}</p>
-            <p v-if="progressPercent < 1" class="text-gray-200 text-xs">{{ $getString('LabelTimeRemaining', [$elapsedPretty(userTimeRemaining)]) }}</p>
+            <p v-if="progressPercent < 1 && !useEBookProgress" class="text-gray-200 text-xs">{{ $getString('LabelTimeRemaining', [$elapsedPretty(userTimeRemaining)]) }}</p>
             <p class="text-gray-400 text-xs pt-1">{{ $strings.LabelStarted }} {{ $formatDate(userProgressStartedAt, dateFormat) }}</p>
 
             <div v-if="!resettingProgress" class="absolute -top-1.5 -right-1.5 p-1 w-5 h-5 rounded-full bg-bg hover:bg-error border border-primary flex items-center justify-center cursor-pointer" @click.stop="clearProgressClick">
@@ -129,20 +91,21 @@
           <!-- Icon buttons -->
           <div class="flex items-center justify-center md:justify-start pt-4">
             <ui-btn v-if="showPlayButton" :disabled="isStreaming" color="success" :padding-x="4" small class="flex items-center h-9 mr-2" @click="playItem">
-              <span v-show="!isStreaming" class="material-icons -ml-2 pr-1 text-white">play_arrow</span>
+              <span v-show="!isStreaming" class="material-icons text-2xl -ml-2 pr-1 text-white">play_arrow</span>
               {{ isStreaming ? $strings.ButtonPlaying : $strings.ButtonPlay }}
             </ui-btn>
+
             <ui-btn v-else-if="isMissing || isInvalid" color="error" :padding-x="4" small class="flex items-center h-9 mr-2">
-              <span v-show="!isStreaming" class="material-icons -ml-2 pr-1 text-white">error</span>
+              <span v-show="!isStreaming" class="material-icons text-2xl -ml-2 pr-1 text-white">error</span>
               {{ isMissing ? $strings.LabelMissing : $strings.LabelIncomplete }}
             </ui-btn>
 
             <ui-tooltip v-if="showQueueBtn" :text="isQueued ? $strings.ButtonQueueRemoveItem : $strings.ButtonQueueAddItem" direction="top">
-              <ui-icon-btn :icon="isQueued ? 'playlist_add_check' : 'playlist_add'" class="mx-0.5" :class="isQueued ? 'text-success' : ''" @click="queueBtnClick" />
+              <ui-icon-btn :icon="isQueued ? 'playlist_add_check' : 'playlist_play'" :bg-color="isQueued ? 'primary' : 'success bg-opacity-60'" class="mx-0.5" :class="isQueued ? 'text-success' : ''" @click="queueBtnClick" />
             </ui-tooltip>
 
             <ui-btn v-if="showReadButton" color="info" :padding-x="4" small class="flex items-center h-9 mr-2" @click="openEbook">
-              <span class="material-icons -ml-2 pr-2 text-white">auto_stories</span>
+              <span class="material-icons text-2xl -ml-2 pr-2 text-white">auto_stories</span>
               {{ $strings.ButtonRead }}
             </ui-btn>
 
@@ -150,12 +113,8 @@
               <ui-icon-btn icon="edit" class="mx-0.5" @click="editClick" />
             </ui-tooltip>
 
-            <ui-tooltip v-if="!isPodcast" :text="userIsFinished ? $strings.MessageMarkAsNotFinished : $strings.MessageMarkAsFinished" direction="top">
+            <ui-tooltip v-if="!isPodcast && !isMusic" :text="userIsFinished ? $strings.MessageMarkAsNotFinished : $strings.MessageMarkAsFinished" direction="top">
               <ui-read-icon-btn :disabled="isProcessingReadUpdate" :is-read="userIsFinished" class="mx-0.5" @click="toggleFinished" />
-            </ui-tooltip>
-
-            <ui-tooltip v-if="!isPodcast && userCanUpdate" :text="$strings.LabelCollections" direction="top">
-              <ui-icon-btn icon="collections_bookmark" class="mx-0.5" outlined @click="collectionsClick" />
             </ui-tooltip>
 
             <!-- Only admin or root user can download new episodes -->
@@ -163,14 +122,13 @@
               <ui-icon-btn icon="search" class="mx-0.5" :loading="fetchingRSSFeed" outlined @click="findEpisodesClick" />
             </ui-tooltip>
 
-            <ui-tooltip v-if="bookmarks.length" :text="$strings.LabelYourBookmarks" direction="top">
-              <ui-icon-btn :icon="bookmarks.length ? 'bookmarks' : 'bookmark_border'" class="mx-0.5" @click="clickBookmarksBtn" />
-            </ui-tooltip>
-
-            <!-- RSS feed -->
-            <ui-tooltip v-if="showRssFeedBtn" :text="$strings.LabelOpenRSSFeed" direction="top">
-              <ui-icon-btn icon="rss_feed" class="mx-0.5" :bg-color="rssFeedUrl ? 'success' : 'primary'" outlined @click="clickRSSFeed" />
-            </ui-tooltip>
+            <ui-context-menu-dropdown v-if="contextMenuItems.length" :items="contextMenuItems" menu-width="148px" @action="contextMenuAction">
+              <template #default="{ showMenu, clickShowMenu, disabled }">
+                <button type="button" :disabled="disabled" class="mx-0.5 icon-btn bg-primary border border-gray-600 w-9 h-9 rounded-md flex items-center justify-center relative" aria-haspopup="listbox" :aria-expanded="showMenu" @click.stop.prevent="clickShowMenu">
+                  <span class="material-icons">more_horiz</span>
+                </button>
+              </template>
+            </ui-context-menu-dropdown>
           </div>
 
           <div class="my-4 max-w-2xl">
@@ -189,13 +147,12 @@
 
           <tables-chapters-table v-if="chapters.length" :library-item="libraryItem" class="mt-6" />
 
-          <tables-library-files-table v-if="libraryFiles.length" :is-missing="isMissing" :library-item-id="libraryItemId" :files="libraryFiles" class="mt-6" />
+          <tables-library-files-table v-if="libraryFiles.length" :is-missing="isMissing" :library-item="libraryItem" class="mt-6" />
         </div>
       </div>
     </div>
 
     <modals-podcast-episode-feed v-model="showPodcastEpisodeFeed" :library-item="libraryItem" :episodes="podcastFeedEpisodes" />
-    <modals-rssfeed-view-modal v-model="showRssFeedModal" :library-item="libraryItem" :feed-url="rssFeedUrl" />
     <modals-bookmarks-modal v-model="showBookmarksModal" :bookmarks="bookmarks" :library-item-id="libraryItemId" hide-create @select="selectBookmark" />
   </div>
 </template>
@@ -218,7 +175,7 @@ export default {
     }
     return {
       libraryItem: item,
-      rssFeedUrl: item.rssFeedUrl || null
+      rssFeed: item.rssFeed || null
     }
   },
   data() {
@@ -230,11 +187,16 @@ export default {
       podcastFeedEpisodes: [],
       episodesDownloading: [],
       episodeDownloadsQueued: [],
-      showRssFeedModal: false,
       showBookmarksModal: false
     }
   },
   computed: {
+    userToken() {
+      return this.$store.getters['user/getToken']
+    },
+    downloadUrl() {
+      return `${process.env.serverUrl}/api/items/${this.libraryItemId}/download?token=${this.userToken}`
+    },
     dateFormat() {
       return this.$store.state.serverSettings.dateFormat
     },
@@ -247,9 +209,6 @@ export default {
     userIsAdminOrUp() {
       return this.$store.getters['user/getIsAdminOrUp']
     },
-    isFile() {
-      return this.libraryItem.isFile
-    },
     bookCoverAspectRatio() {
       return this.$store.getters['libraries/getBookCoverAspectRatio']
     },
@@ -259,11 +218,20 @@ export default {
     isDeveloperMode() {
       return this.$store.state.developerMode
     },
+    isFile() {
+      return this.libraryItem.isFile
+    },
+    isBook() {
+      return this.libraryItem.mediaType === 'book'
+    },
     isPodcast() {
       return this.libraryItem.mediaType === 'podcast'
     },
     isVideo() {
       return this.libraryItem.mediaType === 'video'
+    },
+    isMusic() {
+      return this.libraryItem.mediaType === 'music'
     },
     isMissing() {
       return this.libraryItem.isMissing
@@ -271,12 +239,19 @@ export default {
     isInvalid() {
       return this.libraryItem.isInvalid
     },
+    isExplicit() {
+      return !!this.mediaMetadata.explicit
+    },
+    isAbridged() {
+      return !!this.mediaMetadata.abridged
+    },
     invalidAudioFiles() {
-      if (this.isPodcast || this.isVideo) return []
+      if (!this.isBook) return []
       return this.libraryItem.media.audioFiles.filter((af) => af.invalid)
     },
     showPlayButton() {
       if (this.isMissing || this.isInvalid) return false
+      if (this.isMusic) return !!this.audioFile
       if (this.isVideo) return !!this.videoFile
       if (this.isPodcast) return this.podcastEpisodes.length
       return this.tracks.length
@@ -286,9 +261,6 @@ export default {
     },
     libraryId() {
       return this.libraryItem.libraryId
-    },
-    folderId() {
-      return this.libraryItem.folderId
     },
     libraryItemId() {
       return this.libraryItem.id
@@ -315,18 +287,9 @@ export default {
     title() {
       return this.mediaMetadata.title || 'No Title'
     },
-    publishedYear() {
-      return this.mediaMetadata.publishedYear
-    },
-    narrator() {
-      return this.mediaMetadata.narratorName
-    },
     bookSubtitle() {
       if (this.isPodcast) return null
       return this.mediaMetadata.subtitle
-    },
-    genres() {
-      return this.mediaMetadata.genres || []
     },
     podcastAuthor() {
       return this.mediaMetadata.author || ''
@@ -334,15 +297,15 @@ export default {
     authors() {
       return this.mediaMetadata.authors || []
     },
-    narrators() {
-      return this.mediaMetadata.narrators || []
+    musicArtists() {
+      return this.mediaMetadata.artists || []
     },
     series() {
       return this.mediaMetadata.series || []
     },
     seriesList() {
       return this.series.map((se) => {
-        var text = se.name
+        let text = se.name
         if (se.sequence) text += ` #${se.sequence}`
         return {
           ...se,
@@ -350,16 +313,9 @@ export default {
         }
       })
     },
-    durationPretty() {
-      if (!this.tracks.length) return 'N/A'
-      return this.$elapsedPretty(this.media.duration)
-    },
     duration() {
-      if (!this.tracks.length) return 0
+      if (!this.tracks.length && !this.audioFile) return 0
       return this.media.duration
-    },
-    sizePretty() {
-      return this.$bytesPretty(this.media.size)
     },
     libraryFiles() {
       return this.libraryItem.libraryFiles || []
@@ -370,6 +326,10 @@ export default {
     videoFile() {
       return this.media.videoFile
     },
+    audioFile() {
+      // Music track
+      return this.media.audioFile
+    },
     showExperimentalReadAlert() {
       return !this.tracks.length && this.ebookFile && !this.showExperimentalFeatures && !this.enableEReader
     },
@@ -377,6 +337,7 @@ export default {
       return this.mediaMetadata.description || ''
     },
     userMediaProgress() {
+      if (this.isMusic) return null
       return this.$store.getters['user/getUserMediaProgress'](this.libraryItemId)
     },
     userIsFinished() {
@@ -384,10 +345,15 @@ export default {
     },
     userTimeRemaining() {
       if (!this.userMediaProgress) return 0
-      var duration = this.userMediaProgress.duration || this.duration
+      const duration = this.userMediaProgress.duration || this.duration
       return duration - this.userMediaProgress.currentTime
     },
+    useEBookProgress() {
+      if (!this.userMediaProgress || this.userMediaProgress.progress) return false
+      return this.userMediaProgress.ebookProgress > 0
+    },
     progressPercent() {
+      if (this.useEBookProgress) return Math.max(Math.min(1, this.userMediaProgress.ebookProgress), 0)
       return this.userMediaProgress ? Math.max(Math.min(1, this.userMediaProgress.progress), 0) : 0
     },
     userProgressStartedAt() {
@@ -415,20 +381,67 @@ export default {
       return this.$store.getters['user/getUserCanDownload']
     },
     showRssFeedBtn() {
-      if (!this.rssFeedUrl && !this.podcastEpisodes.length && !this.tracks.length) return false // Cannot open RSS feed with no episodes/tracks
+      if (!this.rssFeed && !this.podcastEpisodes.length && !this.tracks.length) return false // Cannot open RSS feed with no episodes/tracks
 
       // If rss feed is open then show feed url to users otherwise just show to admins
-      return this.userIsAdminOrUp || this.rssFeedUrl
+      return this.userIsAdminOrUp || this.rssFeed
     },
     showQueueBtn() {
-      if (this.isPodcast || this.isVideo) return false
+      if (!this.isBook) return false
       return !this.$store.getters['getIsStreamingFromDifferentLibrary'] && this.streamLibraryItem
+    },
+    showCollectionsButton() {
+      return this.isBook && this.userCanUpdate
+    },
+    contextMenuItems() {
+      const items = []
+
+      if (this.showCollectionsButton) {
+        items.push({
+          text: this.$strings.LabelCollections,
+          action: 'collections'
+        })
+      }
+
+      if (!this.isPodcast && this.tracks.length) {
+        items.push({
+          text: this.$strings.LabelYourPlaylists,
+          action: 'playlists'
+        })
+      }
+
+      if (this.bookmarks.length) {
+        items.push({
+          text: this.$strings.LabelYourBookmarks,
+          action: 'bookmarks'
+        })
+      }
+
+      if (this.showRssFeedBtn) {
+        items.push({
+          text: this.$strings.LabelOpenRSSFeed,
+          action: 'rss-feeds'
+        })
+      }
+
+      if (this.userCanDownload) {
+        items.push({
+          text: this.$strings.LabelDownload,
+          action: 'download'
+        })
+      }
+
+      if (this.userCanDelete) {
+        items.push({
+          text: this.$strings.ButtonDelete,
+          action: 'delete'
+        })
+      }
+
+      return items
     }
   },
   methods: {
-    clickBookmarksBtn() {
-      this.showBookmarksModal = true
-    },
     selectBookmark(bookmark) {
       if (!bookmark) return
       if (this.isStreaming) {
@@ -527,14 +540,14 @@ export default {
         })
     },
     playItem(startTime = null) {
-      var episodeId = null
+      let episodeId = null
       const queueItems = []
       if (this.isPodcast) {
         const episodesInListeningOrder = this.podcastEpisodes.map((ep) => ({ ...ep })).sort((a, b) => String(a.publishedAt).localeCompare(String(b.publishedAt), undefined, { numeric: true, sensitivity: 'base' }))
 
         // Find most recent episode unplayed
-        var episodeIndex = episodesInListeningOrder.findLastIndex((ep) => {
-          var podcastProgress = this.$store.getters['user/getUserMediaProgress'](this.libraryItemId, ep.id)
+        let episodeIndex = episodesInListeningOrder.findLastIndex((ep) => {
+          const podcastProgress = this.$store.getters['user/getUserMediaProgress'](this.libraryItemId, ep.id)
           return !podcastProgress || !podcastProgress.isFinished
         })
         if (episodeIndex < 0) episodeIndex = 0
@@ -551,7 +564,7 @@ export default {
               episodeId: episode.id,
               title: episode.title,
               subtitle: this.title,
-              caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, 'MMM do, yyyy')}` : 'Unknown publish date',
+              caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
               duration: episode.audioFile.duration || null,
               coverPath: this.libraryItem.media.coverPath || null
             })
@@ -604,12 +617,14 @@ export default {
           })
       }
     },
-    collectionsClick() {
-      this.$store.commit('setSelectedLibraryItem', this.libraryItem)
-      this.$store.commit('globals/setShowCollectionsModal', true)
-    },
     clickRSSFeed() {
-      this.showRssFeedModal = true
+      this.$store.commit('globals/setRSSFeedOpenCloseModal', {
+        id: this.libraryItemId,
+        name: this.title,
+        type: 'item',
+        feed: this.rssFeed,
+        hasEpisodesWithoutPubDate: this.podcastEpisodes.some((ep) => !ep.pubDate)
+      })
     },
     episodeDownloadQueued(episodeDownload) {
       if (episodeDownload.libraryItemId === this.libraryItemId) {
@@ -631,13 +646,13 @@ export default {
     rssFeedOpen(data) {
       if (data.entityId === this.libraryItemId) {
         console.log('RSS Feed Opened', data)
-        this.rssFeedUrl = data.feedUrl
+        this.rssFeed = data
       }
     },
     rssFeedClosed(data) {
       if (data.entityId === this.libraryItemId) {
         console.log('RSS Feed Closed', data)
-        this.rssFeedUrl = null
+        this.rssFeed = null
       }
     },
     queueBtnClick() {
@@ -659,12 +674,63 @@ export default {
         }
         this.$store.commit('addItemToQueue', queueItem)
       }
+    },
+    downloadLibraryItem() {
+      const a = document.createElement('a')
+      a.style.display = 'none'
+      a.href = this.downloadUrl
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        a.remove()
+      })
+    },
+    deleteLibraryItem() {
+      const payload = {
+        message: 'This will delete the library item from the database and your file system. Are you sure?',
+        checkboxLabel: 'Delete from file system. Uncheck to only remove from database.',
+        yesButtonText: this.$strings.ButtonDelete,
+        yesButtonColor: 'error',
+        checkboxDefaultValue: true,
+        callback: (confirmed, hardDelete) => {
+          if (confirmed) {
+            this.$axios
+              .$delete(`/api/items/${this.libraryItemId}?hard=${hardDelete ? 1 : 0}`)
+              .then(() => {
+                this.$toast.success('Item deleted')
+                this.$router.replace(`/library/${this.libraryId}`)
+              })
+              .catch((error) => {
+                console.error('Failed to delete item', error)
+                this.$toast.error('Failed to delete item')
+              })
+          }
+        },
+        type: 'yesNo'
+      }
+      this.$store.commit('globals/setConfirmPrompt', payload)
+    },
+    contextMenuAction(action) {
+      if (action === 'collections') {
+        this.$store.commit('setSelectedLibraryItem', this.libraryItem)
+        this.$store.commit('globals/setShowCollectionsModal', true)
+      } else if (action === 'playlists') {
+        this.$store.commit('globals/setSelectedPlaylistItems', [{ libraryItem: this.libraryItem }])
+        this.$store.commit('globals/setShowPlaylistsModal', true)
+      } else if (action === 'bookmarks') {
+        this.showBookmarksModal = true
+      } else if (action === 'rss-feeds') {
+        this.clickRSSFeed()
+      } else if (action === 'download') {
+        this.downloadLibraryItem()
+      } else if (action === 'delete') {
+        this.deleteLibraryItem()
+      }
     }
   },
   mounted() {
-    if (this.libraryItem.episodesDownloading) {
-      this.episodeDownloadsQueued = this.libraryItem.episodesDownloading || []
-    }
+    this.episodeDownloadsQueued = this.libraryItem.episodeDownloadsQueued || []
+    this.episodesDownloading = this.libraryItem.episodesDownloading || []
 
     // use this items library id as the current
     if (this.libraryId) {

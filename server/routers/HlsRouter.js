@@ -1,16 +1,20 @@
 const express = require('express')
 const Path = require('path')
-const fs = require('../libs/fsExtra')
+
 const Logger = require('../Logger')
+const SocketAuthority = require('../SocketAuthority')
+
+const fs = require('../libs/fsExtra')
+
 
 class HlsRouter {
-  constructor(db, auth, playbackSessionManager, emitter) {
+  constructor(db, auth, playbackSessionManager) {
     this.db = db
     this.auth = auth
     this.playbackSessionManager = playbackSessionManager
-    this.emitter = emitter
 
     this.router = express()
+    this.router.disable('x-powered-by')
     this.init()
   }
 
@@ -49,7 +53,7 @@ class HlsRouter {
           if (startTimeForReset) {
             // HLS.js will restart the stream at the new time
             Logger.info(`[HlsRouter] Resetting Stream - notify client @${startTimeForReset}s`)
-            this.emitter('stream_reset', {
+            SocketAuthority.emitter('stream_reset', {
               startTime: startTimeForReset,
               streamId: stream.id
             })

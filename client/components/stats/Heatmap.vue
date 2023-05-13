@@ -68,7 +68,7 @@ export default {
     dayLabels() {
       return [
         {
-          label: 'Mon',
+          label: this.$formatJsDate(new Date(2023, 0, 2), 'EEE'),
           style: {
             transform: `translate(${-25}px, ${13}px)`,
             lineHeight: '10px',
@@ -76,7 +76,7 @@ export default {
           }
         },
         {
-          label: 'Wed',
+          label: this.$formatJsDate(new Date(2023, 0, 4), 'EEE'),
           style: {
             transform: `translate(${-25}px, ${13 * 3}px)`,
             lineHeight: '10px',
@@ -84,7 +84,7 @@ export default {
           }
         },
         {
-          label: 'Fri',
+          label: this.$formatJsDate(new Date(2023, 0, 6), 'EEE'),
           style: {
             transform: `translate(${-25}px, ${13 * 5}px)`,
             lineHeight: '10px',

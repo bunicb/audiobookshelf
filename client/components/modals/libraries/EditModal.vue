@@ -2,16 +2,16 @@
   <modals-modal v-model="show" name="edit-library" :width="700" :height="'unset'" :processing="processing">
     <template #outer>
       <div class="absolute top-0 left-0 p-5 w-2/3 overflow-hidden">
-        <p class="font-book text-xl md:text-3xl text-white truncate">{{ title }}</p>
+        <p class="text-xl md:text-3xl text-white truncate">{{ title }}</p>
       </div>
     </template>
     <div class="absolute -top-10 left-0 z-10 w-full flex">
       <template v-for="tab in tabs">
-        <div :key="tab.id" class="w-28 rounded-t-lg flex items-center justify-center mr-1 cursor-pointer hover:bg-bg font-book border-t border-l border-r border-black-300 tab text-xs sm:text-base" :class="selectedTab === tab.id ? 'tab-selected bg-bg pb-px' : 'bg-primary text-gray-400'" @click="selectTab(tab.id)">{{ tab.title }}</div>
+        <div :key="tab.id" class="w-28 rounded-t-lg flex items-center justify-center mr-1 cursor-pointer hover:bg-bg border-t border-l border-r border-black-300 tab text-xs sm:text-base" :class="selectedTab === tab.id ? 'tab-selected bg-bg pb-px' : 'bg-primary text-gray-400'" @click="selectTab(tab.id)">{{ tab.title }}</div>
       </template>
     </div>
 
-    <div class="px-2 md:px-4 w-full text-sm pt-6 pb-20 rounded-b-lg rounded-tr-lg bg-bg shadow-lg border border-black-300 relative overflow-hidden" style="min-height: 400px; max-height: 80vh">
+    <div class="px-2 md:px-4 w-full text-sm pt-2 md:pt-6 pb-20 rounded-b-lg rounded-tr-lg bg-bg shadow-lg border border-black-300 relative overflow-hidden" style="min-height: 400px; max-height: 80vh">
       <component v-if="libraryCopy && show" ref="tabComponent" :is="tabName" :is-new="!library" :library="libraryCopy" :processing.sync="processing" @update="updateLibrary" @close="show = false" />
 
       <div class="absolute bottom-0 left-0 w-full px-4 py-4 border-t border-white border-opacity-10">
@@ -144,14 +144,14 @@ export default {
       return true
     },
     submit() {
-      if (!this.validate()) return
-
       // If custom expression input is focused then unfocus it instead of submitting
       if (this.$refs.tabComponent && this.$refs.tabComponent.checkBlurExpressionInput) {
         if (this.$refs.tabComponent.checkBlurExpressionInput()) {
           return
         }
       }
+
+      if (!this.validate()) return
 
       if (this.library) {
         this.submitUpdateLibrary()
