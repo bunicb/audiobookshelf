@@ -1,5 +1,4 @@
 const { BookshelfView } = require('../../utils/constants')
-const { isNullOrNaN } = require('../../utils')
 const Logger = require('../../Logger')
 
 class ServerSettings {
@@ -16,11 +15,11 @@ class ServerSettings {
     this.scannerPreferMatchedMetadata = false
     this.scannerDisableWatcher = false
     this.scannerPreferOverdriveMediaMarker = false
-    this.scannerUseTone = false
 
     // Metadata - choose to store inside users library item folder
     this.storeCoverWithItem = false
     this.storeMetadataWithItem = false
+    this.metadataFileFormat = 'json'
 
     // Security/Rate limits
     this.rateLimitLoginRequests = 10
@@ -30,7 +29,6 @@ class ServerSettings {
     this.backupSchedule = false // If false then auto-backups are disabled
     this.backupsToKeep = 2
     this.maxBackupSize = 1
-    this.backupMetadataCovers = true
 
     // Logger
     this.loggerDailyLogsToKeep = 7
@@ -45,11 +43,10 @@ class ServerSettings {
 
     // Sorting
     this.sortingIgnorePrefix = false
-    this.sortingPrefixes = ['the']
+    this.sortingPrefixes = ['the', 'a']
 
     // Misc Flags
     this.chromecastEnabled = false
-    this.enableEReader = false
     this.dateFormat = 'MM/dd/yyyy'
     this.timeFormat = 'HH:mm'
     this.language = 'en-us'
@@ -73,10 +70,10 @@ class ServerSettings {
     this.scannerPreferMatchedMetadata = !!settings.scannerPreferMatchedMetadata
     this.scannerDisableWatcher = !!settings.scannerDisableWatcher
     this.scannerPreferOverdriveMediaMarker = !!settings.scannerPreferOverdriveMediaMarker
-    this.scannerUseTone = !!settings.scannerUseTone
 
     this.storeCoverWithItem = !!settings.storeCoverWithItem
     this.storeMetadataWithItem = !!settings.storeMetadataWithItem
+    this.metadataFileFormat = settings.metadataFileFormat || 'json'
 
     this.rateLimitLoginRequests = !isNaN(settings.rateLimitLoginRequests) ? Number(settings.rateLimitLoginRequests) : 10
     this.rateLimitLoginWindow = !isNaN(settings.rateLimitLoginWindow) ? Number(settings.rateLimitLoginWindow) : 10 * 60 * 1000 // 10 Minutes
@@ -84,7 +81,6 @@ class ServerSettings {
     this.backupSchedule = settings.backupSchedule || false
     this.backupsToKeep = settings.backupsToKeep || 2
     this.maxBackupSize = settings.maxBackupSize || 1
-    this.backupMetadataCovers = settings.backupMetadataCovers !== false
 
     this.loggerDailyLogsToKeep = settings.loggerDailyLogsToKeep || 7
     this.loggerScannerLogsToKeep = settings.loggerScannerLogsToKeep || 2
@@ -95,7 +91,6 @@ class ServerSettings {
     this.sortingIgnorePrefix = !!settings.sortingIgnorePrefix
     this.sortingPrefixes = settings.sortingPrefixes || ['the']
     this.chromecastEnabled = !!settings.chromecastEnabled
-    this.enableEReader = !!settings.enableEReader
     this.dateFormat = settings.dateFormat || 'MM/dd/yyyy'
     this.timeFormat = settings.timeFormat || 'HH:mm'
     this.language = settings.language || 'en-us'
@@ -111,6 +106,16 @@ class ServerSettings {
     }
     if (settings.homeBookshelfView == undefined) { // homeBookshelfView was added in 2.1.3
       this.homeBookshelfView = settings.bookshelfView
+    }
+    if (settings.metadataFileFormat == undefined) { // metadataFileFormat was added in 2.2.21
+      // All users using old settings will stay abs until changed
+      this.metadataFileFormat = 'abs'
+    }
+
+    // Validation
+    if (!['abs', 'json'].includes(this.metadataFileFormat)) {
+      Logger.error(`[ServerSettings] construct: Invalid metadataFileFormat ${this.metadataFileFormat}`)
+      this.metadataFileFormat = 'json'
     }
 
     if (this.logLevel !== Logger.logLevel) {
@@ -130,15 +135,14 @@ class ServerSettings {
       scannerPreferMatchedMetadata: this.scannerPreferMatchedMetadata,
       scannerDisableWatcher: this.scannerDisableWatcher,
       scannerPreferOverdriveMediaMarker: this.scannerPreferOverdriveMediaMarker,
-      scannerUseTone: this.scannerUseTone,
       storeCoverWithItem: this.storeCoverWithItem,
       storeMetadataWithItem: this.storeMetadataWithItem,
+      metadataFileFormat: this.metadataFileFormat,
       rateLimitLoginRequests: this.rateLimitLoginRequests,
       rateLimitLoginWindow: this.rateLimitLoginWindow,
       backupSchedule: this.backupSchedule,
       backupsToKeep: this.backupsToKeep,
       maxBackupSize: this.maxBackupSize,
-      backupMetadataCovers: this.backupMetadataCovers,
       loggerDailyLogsToKeep: this.loggerDailyLogsToKeep,
       loggerScannerLogsToKeep: this.loggerScannerLogsToKeep,
       homeBookshelfView: this.homeBookshelfView,
@@ -146,7 +150,6 @@ class ServerSettings {
       sortingIgnorePrefix: this.sortingIgnorePrefix,
       sortingPrefixes: [...this.sortingPrefixes],
       chromecastEnabled: this.chromecastEnabled,
-      enableEReader: this.enableEReader,
       dateFormat: this.dateFormat,
       timeFormat: this.timeFormat,
       language: this.language,

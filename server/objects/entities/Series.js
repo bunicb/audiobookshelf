@@ -1,4 +1,5 @@
-const { getId } = require('../../utils/index')
+const uuidv4 = require("uuid").v4
+const { getTitleIgnorePrefix, getTitlePrefixAtEnd } = require('../../utils/index')
 
 class Series {
   constructor(series) {
@@ -7,6 +8,7 @@ class Series {
     this.description = null
     this.addedAt = null
     this.updatedAt = null
+    this.libraryId = null
 
     if (series) {
       this.construct(series)
@@ -19,15 +21,23 @@ class Series {
     this.description = series.description || null
     this.addedAt = series.addedAt
     this.updatedAt = series.updatedAt
+    this.libraryId = series.libraryId
+  }
+
+  get nameIgnorePrefix() {
+    if (!this.name) return ''
+    return getTitleIgnorePrefix(this.name)
   }
 
   toJSON() {
     return {
       id: this.id,
       name: this.name,
+      nameIgnorePrefix: getTitlePrefixAtEnd(this.name),
       description: this.description,
       addedAt: this.addedAt,
-      updatedAt: this.updatedAt
+      updatedAt: this.updatedAt,
+      libraryId: this.libraryId
     }
   }
 
@@ -39,12 +49,13 @@ class Series {
     }
   }
 
-  setData(data) {
-    this.id = getId('ser')
+  setData(data, libraryId) {
+    this.id = uuidv4()
     this.name = data.name
     this.description = data.description || null
     this.addedAt = Date.now()
     this.updatedAt = Date.now()
+    this.libraryId = libraryId
   }
 
   update(series) {

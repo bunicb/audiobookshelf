@@ -2,15 +2,12 @@ const Logger = require('../../Logger')
 const PodcastEpisode = require('../entities/PodcastEpisode')
 const PodcastMetadata = require('../metadata/PodcastMetadata')
 const { areEquivalent, copyValue, cleanStringForSearch } = require('../../utils/index')
-const abmetadataGenerator = require('../../utils/abmetadataGenerator')
+const abmetadataGenerator = require('../../utils/generators/abmetadataGenerator')
 const { readTextFile, filePathToPOSIX } = require('../../utils/fileUtils')
-const { createNewSortInstance } = require('../../libs/fastSort')
-const naturalSort = createNewSortInstance({
-  comparer: new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare
-})
 
 class Podcast {
   constructor(podcast) {
+    this.id = null
     this.libraryItemId = null
     this.metadata = null
     this.coverPath = null
@@ -32,6 +29,7 @@ class Podcast {
   }
 
   construct(podcast) {
+    this.id = podcast.id
     this.libraryItemId = podcast.libraryItemId
     this.metadata = new PodcastMetadata(podcast.metadata)
     this.coverPath = podcast.coverPath
@@ -50,6 +48,7 @@ class Podcast {
 
   toJSON() {
     return {
+      id: this.id,
       libraryItemId: this.libraryItemId,
       metadata: this.metadata.toJSON(),
       coverPath: this.coverPath,
@@ -65,6 +64,7 @@ class Podcast {
 
   toJSONMinified() {
     return {
+      id: this.id,
       metadata: this.metadata.toJSONMinified(),
       coverPath: this.coverPath,
       tags: [...this.tags],
@@ -80,6 +80,7 @@ class Podcast {
 
   toJSONExpanded() {
     return {
+      id: this.id,
       libraryItemId: this.libraryItemId,
       metadata: this.metadata.toJSONExpanded(),
       coverPath: this.coverPath,
@@ -91,6 +92,13 @@ class Podcast {
       maxEpisodesToKeep: this.maxEpisodesToKeep,
       maxNewEpisodesToDownload: this.maxNewEpisodesToDownload,
       size: this.size
+    }
+  }
+
+  toJSONForMetadataFile() {
+    return {
+      tags: [...this.tags],
+      metadata: this.metadata.toJSON()
     }
   }
 
@@ -199,10 +207,11 @@ class Podcast {
     let metadataUpdatePayload = {}
     let tagsUpdated = false
 
-    const metadataAbs = textMetadataFiles.find(lf => lf.metadata.filename === 'metadata.abs')
+    const metadataAbs = textMetadataFiles.find(lf => lf.metadata.filename === 'metadata.abs' || lf.metadata.filename === 'metadata.json')
     if (metadataAbs) {
+      const isJSON = metadataAbs.metadata.filename === 'metadata.json'
       const metadataText = await readTextFile(metadataAbs.metadata.path)
-      const abmetadataUpdates = abmetadataGenerator.parseAndCheckForUpdates(metadataText, this, 'podcast')
+      const abmetadataUpdates = abmetadataGenerator.parseAndCheckForUpdates(metadataText, this, 'podcast', isJSON)
       if (abmetadataUpdates && Object.keys(abmetadataUpdates).length) {
         Logger.debug(`[Podcast] "${this.metadata.title}" changes found in metadata.abs file`, abmetadataUpdates)
 
@@ -272,28 +281,15 @@ class Podcast {
 
   addPodcastEpisode(podcastEpisode) {
     this.episodes.push(podcastEpisode)
-    this.reorderEpisodes()
   }
 
   addNewEpisodeFromAudioFile(audioFile, index) {
-    var pe = new PodcastEpisode()
+    const pe = new PodcastEpisode()
     pe.libraryItemId = this.libraryItemId
+    pe.podcastId = this.id
     audioFile.index = 1 // Only 1 audio file per episode
     pe.setDataFromAudioFile(audioFile, index)
     this.episodes.push(pe)
-  }
-
-  reorderEpisodes() {
-    var hasUpdates = false
-
-    this.episodes = naturalSort(this.episodes).desc((ep) => ep.publishedAt)
-    for (let i = 0; i < this.episodes.length; i++) {
-      if (this.episodes[i].index !== (i + 1)) {
-        this.episodes[i].index = i + 1
-        hasUpdates = true
-      }
-    }
-    return hasUpdates
   }
 
   removeEpisode(episodeId) {
@@ -321,6 +317,11 @@ class Podcast {
   }
 
   getEpisode(episodeId) {
+    if (!episodeId) return null
+
+    // Support old episode ids for mobile downloads
+    if (episodeId.startsWith('ep_')) return this.episodes.find(ep => ep.oldEpisodeId == episodeId)
+
     return this.episodes.find(ep => ep.id == episodeId)
   }
 
@@ -330,6 +331,10 @@ class Podcast {
     const audioFile = this.episodes[0].audioFile
     if (!audioFile?.metaTags) return false
     return this.metadata.setDataFromAudioMetaTags(audioFile.metaTags, overrideExistingDetails)
+  }
+
+  getChapters(episodeId) {
+    return this.getEpisode(episodeId)?.chapters?.map(ch => ({ ...ch })) || []
   }
 }
 module.exports = Podcast

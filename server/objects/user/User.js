@@ -5,6 +5,7 @@ const MediaProgress = require('./MediaProgress')
 class User {
   constructor(user) {
     this.id = null
+    this.oldUserId = null // TODO: Temp for keeping old access tokens
     this.username = null
     this.pash = null
     this.type = null
@@ -73,6 +74,7 @@ class User {
   toJSON() {
     return {
       id: this.id,
+      oldUserId: this.oldUserId,
       username: this.username,
       pash: this.pash,
       type: this.type,
@@ -93,6 +95,7 @@ class User {
   toJSONForBrowser(hideRootToken = false, minimal = false) {
     const json = {
       id: this.id,
+      oldUserId: this.oldUserId,
       username: this.username,
       type: this.type,
       token: (this.type === 'root' && hideRootToken) ? '' : this.token,
@@ -114,22 +117,20 @@ class User {
     return json
   }
 
-  // Data broadcasted
-  toJSONForPublic(sessions, libraryItems) {
-    var userSession = sessions ? sessions.find(s => s.userId === this.id) : null
-    var session = null
-    if (userSession) {
-      var libraryItem = libraryItems.find(li => li.id === userSession.libraryItemId)
-      if (libraryItem) {
-        session = userSession.toJSONForClient(libraryItem)
-      }
-    }
+  /**
+   * User data for clients
+   * @param {[oldPlaybackSession[]]} sessions optional array of open playback sessions
+   * @returns {object}
+   */
+  toJSONForPublic(sessions) {
+    const userSession = sessions?.find(s => s.userId === this.id) || null
+    const session = userSession?.toJSONForClient() || null
     return {
       id: this.id,
+      oldUserId: this.oldUserId,
       username: this.username,
       type: this.type,
       session,
-      mostRecent: this.getMostRecentItemProgress(libraryItems),
       lastSeen: this.lastSeen,
       createdAt: this.createdAt
     }
@@ -137,6 +138,7 @@ class User {
 
   construct(user) {
     this.id = user.id
+    this.oldUserId = user.oldUserId
     this.username = user.username
     this.pash = user.pash
     this.type = user.type
@@ -253,50 +255,15 @@ class User {
     return hasUpdates
   }
 
-  getDefaultLibraryId(libraries) {
+  /**
+   * Get first available library id for user
+   * 
+   * @param {string[]} libraryIds
+   * @returns {string|null}
+   */
+  getDefaultLibraryId(libraryIds) {
     // Libraries should already be in ascending display order, find first accessible
-    var firstAccessibleLibrary = libraries.find(lib => this.checkCanAccessLibrary(lib.id))
-    if (!firstAccessibleLibrary) return null
-    return firstAccessibleLibrary.id
-  }
-
-  // Returns most recent media progress w/ `media` object and optionally an `episode` object
-  getMostRecentItemProgress(libraryItems) {
-    if (!this.mediaProgress.length) return null
-    var mediaProgressObjects = this.mediaProgress.map(lip => lip.toJSON())
-    mediaProgressObjects.sort((a, b) => b.lastUpdate - a.lastUpdate)
-
-    var libraryItemMedia = null
-    var progressEpisode = null
-    // Find the most recent progress that still has a libraryItem and episode
-    var mostRecentProgress = mediaProgressObjects.find((progress) => {
-      const libraryItem = libraryItems.find(li => li.id === progress.libraryItemId)
-      if (!libraryItem) {
-        Logger.warn('[User] Library item not found for users progress ' + progress.libraryItemId)
-        return false
-      } else if (progress.episodeId) {
-        const episode = libraryItem.mediaType === 'podcast' ? libraryItem.media.getEpisode(progress.episodeId) : null
-        if (!episode) {
-          Logger.warn(`[User] Episode ${progress.episodeId} not found for user media progress, podcast: ${libraryItem.media.metadata.title}`)
-          return false
-        } else {
-          libraryItemMedia = libraryItem.media.toJSONExpanded()
-          progressEpisode = episode.toJSON()
-          return true
-        }
-      } else {
-        libraryItemMedia = libraryItem.media.toJSONExpanded()
-        return true
-      }
-    })
-
-    if (!mostRecentProgress) return null
-
-    return {
-      ...mostRecentProgress,
-      media: libraryItemMedia,
-      episode: progressEpisode
-    }
+    return libraryIds.find(lid => this.checkCanAccessLibrary(lid)) || null
   }
 
   getMediaProgress(libraryItemId, episodeId = null) {
@@ -320,7 +287,7 @@ class User {
     if (!itemProgress) {
       const newItemProgress = new MediaProgress()
 
-      newItemProgress.setData(libraryItem.id, updatePayload, episodeId)
+      newItemProgress.setData(libraryItem, updatePayload, episodeId, this.id)
       this.mediaProgress.push(newItemProgress)
       return true
     }
@@ -333,12 +300,6 @@ class User {
   removeMediaProgress(id) {
     if (!this.mediaProgress.some(mp => mp.id === id)) return false
     this.mediaProgress = this.mediaProgress.filter(mp => mp.id !== id)
-    return true
-  }
-
-  removeMediaProgressForLibraryItem(libraryItemId) {
-    if (!this.mediaProgress.some(lip => lip.libraryItemId == libraryItemId)) return false
-    this.mediaProgress = this.mediaProgress.filter(lip => lip.libraryItemId != libraryItemId)
     return true
   }
 
@@ -363,6 +324,18 @@ class User {
 
     if (libraryItem.media.metadata.explicit && !this.canAccessExplicitContent) return false
     return this.checkCanAccessLibraryItemWithTags(libraryItem.media.tags)
+  }
+
+  /**
+   * Checks if a user can access a library item
+   * @param {string} libraryId 
+   * @param {boolean} explicit 
+   * @param {string[]} tags 
+   */
+  checkCanAccessLibraryItemWithData(libraryId, explicit, tags) {
+    if (!this.checkCanAccessLibrary(libraryId)) return false
+    if (explicit && !this.canAccessExplicitContent) return false
+    return this.checkCanAccessLibraryItemWithTags(tags)
   }
 
   findBookmark(libraryItemId, time) {
@@ -416,6 +389,24 @@ class User {
     const progress = this.mediaProgress.find(mp => mp.id === progressId)
     if (!progress) return false
     return progress.removeFromContinueListening()
+  }
+
+  /**
+   * Number of podcast episodes not finished for library item
+   * Note: libraryItem passed in from libraryHelpers is not a LibraryItem class instance
+   * @param {LibraryItem|object} libraryItem 
+   * @returns {number}
+   */
+  getNumEpisodesIncompleteForPodcast(libraryItem) {
+    if (!libraryItem?.media.episodes) return 0
+    let numEpisodesIncomplete = 0
+    for (const episode of libraryItem.media.episodes) {
+      const mediaProgress = this.getMediaProgress(libraryItem.id, episode.id)
+      if (!mediaProgress?.isFinished) {
+        numEpisodesIncomplete++
+      }
+    }
+    return numEpisodesIncomplete
   }
 }
 module.exports = User

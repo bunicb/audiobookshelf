@@ -15,7 +15,7 @@
             <div v-if="podcastAuthor" class="pl-1 sm:pl-1.5 text-xs sm:text-base">{{ podcastAuthor }}</div>
             <div v-else-if="musicArtists" class="pl-1 sm:pl-1.5 text-xs sm:text-base">{{ musicArtists }}</div>
             <div v-else-if="authors.length" class="pl-1 sm:pl-1.5 text-xs sm:text-base">
-              <nuxt-link v-for="(author, index) in authors" :key="index" :to="`/author/${author.id}`" class="hover:underline">{{ author.name }}<span v-if="index < authors.length - 1">,&nbsp;</span></nuxt-link>
+              <nuxt-link v-for="(author, index) in authors" :key="index" :to="`/author/${author.id}?library=${libraryId}`" class="hover:underline">{{ author.name }}<span v-if="index < authors.length - 1">,&nbsp;</span></nuxt-link>
             </div>
             <div v-else class="text-xs sm:text-base cursor-pointer pl-1 sm:pl-1.5">{{ $strings.LabelUnknown }}</div>
             <widgets-explicit-indicator :explicit="isExplicit"></widgets-explicit-indicator>
@@ -268,6 +268,10 @@ export default {
     seek(time) {
       this.playerHandler.seek(time)
     },
+    playbackTimeUpdate(time) {
+      // When updating progress from another session
+      this.playerHandler.seek(time, false)
+    },
     setCurrentTime(time) {
       this.currentTime = time
       if (this.$refs.audioPlayer) {
@@ -477,12 +481,14 @@ export default {
   mounted() {
     this.$eventBus.$on('cast-session-active', this.castSessionActive)
     this.$eventBus.$on('playback-seek', this.seek)
+    this.$eventBus.$on('playback-time-update', this.playbackTimeUpdate)
     this.$eventBus.$on('play-item', this.playLibraryItem)
     this.$eventBus.$on('pause-item', this.pauseItem)
   },
   beforeDestroy() {
     this.$eventBus.$off('cast-session-active', this.castSessionActive)
     this.$eventBus.$off('playback-seek', this.seek)
+    this.$eventBus.$off('playback-time-update', this.playbackTimeUpdate)
     this.$eventBus.$off('play-item', this.playLibraryItem)
     this.$eventBus.$off('pause-item', this.pauseItem)
   }

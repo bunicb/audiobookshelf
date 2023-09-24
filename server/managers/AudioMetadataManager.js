@@ -10,8 +10,7 @@ const toneHelpers = require('../utils/toneHelpers')
 const Task = require('../objects/Task')
 
 class AudioMetadataMangaer {
-  constructor(db, taskManager) {
-    this.db = db
+  constructor(taskManager) {
     this.taskManager = taskManager
 
     this.itemsCacheDir = Path.join(global.MetadataPath, 'cache/items')
@@ -34,7 +33,10 @@ class AudioMetadataMangaer {
   }
 
   getToneMetadataObjectForApi(libraryItem) {
-    return toneHelpers.getToneMetadataObject(libraryItem, libraryItem.media.chapters, libraryItem.media.tracks.length)
+    const audioFiles = libraryItem.media.includedAudioFiles
+    let mimeType = audioFiles[0].mimeType
+    if (audioFiles.some(a => a.mimeType !== mimeType)) mimeType = null
+    return toneHelpers.getToneMetadataObject(libraryItem, libraryItem.media.chapters, libraryItem.media.tracks.length, mimeType)
   }
 
   handleBatchEmbed(user, libraryItems, options = {}) {
@@ -56,6 +58,9 @@ class AudioMetadataMangaer {
     // Only writing chapters for single file audiobooks
     const chapters = (audioFiles.length == 1 || forceEmbedChapters) ? libraryItem.media.chapters.map(c => ({ ...c })) : null
 
+    let mimeType = audioFiles[0].mimeType
+    if (audioFiles.some(a => a.mimeType !== mimeType)) mimeType = null
+
     // Create task
     const taskData = {
       libraryItemId: libraryItem.id,
@@ -71,7 +76,7 @@ class AudioMetadataMangaer {
         }
       )),
       coverPath: libraryItem.media.coverPath,
-      metadataObject: toneHelpers.getToneMetadataObject(libraryItem, chapters, audioFiles.length),
+      metadataObject: toneHelpers.getToneMetadataObject(libraryItem, chapters, audioFiles.length, mimeType),
       itemCachePath,
       chapters,
       options: {
@@ -80,7 +85,7 @@ class AudioMetadataMangaer {
       }
     }
     const taskDescription = `Embedding metadata in audiobook "${libraryItem.media.metadata.title}".`
-    task.setData('embed-metadata', 'Embedding Metadata', taskDescription, taskData)
+    task.setData('embed-metadata', 'Embedding Metadata', taskDescription, false, taskData)
 
     if (this.tasksRunning.length >= this.MAX_CONCURRENT_TASKS) {
       Logger.info(`[AudioMetadataManager] Queueing embed metadata for audiobook "${libraryItem.media.metadata.title}"`)

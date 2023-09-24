@@ -1,6 +1,12 @@
 <template>
   <div>
     <app-settings-content :header-text="$strings.HeaderBackups" :description="$strings.MessageBackupsDescription">
+      <div v-if="backupLocation" class="flex items-center mb-4">
+        <span class="material-icons-outlined text-2xl text-black-50 mr-2">folder</span>
+        <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelBackupLocation }}:</span>
+        <div class="text-gray-100 pl-4">{{ backupLocation }}</div>
+      </div>
+
       <div class="flex items-center py-2">
         <ui-toggle-switch v-model="enableBackups" small :disabled="updatingServerSettings" @input="updateBackupsSettings" />
         <ui-tooltip :text="$strings.LabelBackupsEnableAutomaticBackupsHelp">
@@ -11,14 +17,18 @@
       <div v-if="enableBackups" class="mb-6">
         <div class="flex items-center pl-6 mb-2">
           <span class="material-icons-outlined text-2xl text-black-50 mr-2">schedule</span>
-          <div class="w-48"><span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.HeaderSchedule }}:</span></div>
+          <div class="w-40">
+            <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.HeaderSchedule }}:</span>
+          </div>
           <div class="text-gray-100">{{ scheduleDescription }}</div>
           <span class="material-icons text-lg text-black-50 hover:text-yellow-500 cursor-pointer ml-2" @click="showCronBuilder = !showCronBuilder">edit</span>
         </div>
 
         <div v-if="nextBackupDate" class="flex items-center pl-6 py-0.5 px-2">
           <span class="material-icons-outlined text-2xl text-black-50 mr-2">event</span>
-          <div class="w-48"><span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelNextBackupDate }}:</span></div>
+          <div class="w-40">
+            <span class="text-white text-opacity-60 uppercase text-sm">{{ $strings.LabelNextBackupDate }}:</span>
+          </div>
           <div class="text-gray-100">{{ nextBackupDate }}</div>
         </div>
       </div>
@@ -39,7 +49,7 @@
         </ui-tooltip>
       </div>
 
-      <tables-backups-table />
+      <tables-backups-table @loaded="backupsLoaded" />
 
       <modals-backup-schedule-modal v-model="showCronBuilder" :cron-expression.sync="cronExpression" />
     </app-settings-content>
@@ -48,6 +58,11 @@
 
 <script>
 export default {
+  asyncData({ store, redirect }) {
+    if (!store.getters['user/getIsAdminOrUp']) {
+      redirect('/')
+    }
+  },
   data() {
     return {
       updatingServerSettings: false,
@@ -56,7 +71,8 @@ export default {
       maxBackupSize: 1,
       cronExpression: '',
       newServerSettings: {},
-      showCronBuilder: false
+      showCronBuilder: false,
+      backupLocation: ''
     }
   },
   watch: {
@@ -89,6 +105,9 @@ export default {
     }
   },
   methods: {
+    backupsLoaded(backupLocation) {
+      this.backupLocation = backupLocation
+    },
     updateBackupsSettings() {
       if (isNaN(this.maxBackupSize) || this.maxBackupSize <= 0) {
         this.$toast.error('Invalid maximum backup size')
@@ -98,7 +117,7 @@ export default {
         this.$toast.error('Invalid number of backups to keep')
         return
       }
-      var updatePayload = {
+      const updatePayload = {
         backupSchedule: this.enableBackups ? this.cronExpression : false,
         backupsToKeep: Number(this.backupsToKeep),
         maxBackupSize: Number(this.maxBackupSize)
@@ -108,15 +127,15 @@ export default {
     updateServerSettings(payload) {
       this.updatingServerSettings = true
       this.$store
-          .dispatch('updateServerSettings', payload)
-          .then((success) => {
-            console.log('Updated Server Settings', success)
-            this.updatingServerSettings = false
-          })
-          .catch((error) => {
-            console.error('Failed to update server settings', error)
-            this.updatingServerSettings = false
-          })
+        .dispatch('updateServerSettings', payload)
+        .then((success) => {
+          console.log('Updated Server Settings', success)
+          this.updatingServerSettings = false
+        })
+        .catch((error) => {
+          console.error('Failed to update server settings', error)
+          this.updatingServerSettings = false
+        })
     },
     initServerSettings() {
       this.newServerSettings = this.serverSettings ? { ...this.serverSettings } : {}

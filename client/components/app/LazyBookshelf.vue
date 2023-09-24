@@ -78,9 +78,6 @@ export default {
     userIsAdminOrUp() {
       return this.$store.getters['user/getIsAdminOrUp']
     },
-    showExperimentalFeatures() {
-      return this.$store.state.showExperimentalFeatures
-    },
     libraryMediaType() {
       return this.$store.getters['libraries/getCurrentLibraryMediaType']
     },
@@ -316,12 +313,12 @@ export default {
         this.currentSFQueryString = this.buildSearchParams()
       }
 
-      const entityPath = this.entityName === 'series-books' ? 'items' : this.entityName
+      let entityPath = this.entityName === 'series-books' ? 'items' : this.entityName
       const sfQueryString = this.currentSFQueryString ? this.currentSFQueryString + '&' : ''
-      const fullQueryString = `?${sfQueryString}limit=${this.booksPerFetch}&page=${page}&minified=1&include=rssfeed`
+      const fullQueryString = `?${sfQueryString}limit=${this.booksPerFetch}&page=${page}&minified=1&include=rssfeed,numEpisodesIncomplete`
 
       const payload = await this.$axios.$get(`/api/libraries/${this.currentLibraryId}/${entityPath}${fullQueryString}`).catch((error) => {
-        console.error('failed to fetch books', error)
+        console.error('failed to fetch items', error)
         return null
       })
 
@@ -626,6 +623,11 @@ export default {
       return entitiesPerShelfBefore < this.entitiesPerShelf // Books per shelf has changed
     },
     async init(bookshelf) {
+      if (this.entityName === 'series') {
+        this.booksPerFetch = 50
+      } else {
+        this.booksPerFetch = 100
+      }
       this.checkUpdateSearchParams()
       this.initSizeData(bookshelf)
 

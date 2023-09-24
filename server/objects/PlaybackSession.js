@@ -1,6 +1,6 @@
 const date = require('../libs/dateAndTime')
-const { getId } = require('../utils/index')
-const { PlayMethod } = require('../utils/constants')
+const uuidv4 = require("uuid").v4
+const serverVersion = require('../../package.json').version
 const BookMetadata = require('./metadata/BookMetadata')
 const PodcastMetadata = require('./metadata/PodcastMetadata')
 const DeviceInfo = require('./DeviceInfo')
@@ -12,6 +12,7 @@ class PlaybackSession {
     this.userId = null
     this.libraryId = null
     this.libraryItemId = null
+    this.bookId = null
     this.episodeId = null
 
     this.mediaType = null
@@ -25,6 +26,7 @@ class PlaybackSession {
     this.playMethod = null
     this.mediaPlayer = null
     this.deviceInfo = null
+    this.serverVersion = null
 
     this.date = null
     this.dayOfWeek = null
@@ -53,6 +55,7 @@ class PlaybackSession {
       userId: this.userId,
       libraryId: this.libraryId,
       libraryItemId: this.libraryItemId,
+      bookId: this.bookId,
       episodeId: this.episodeId,
       mediaType: this.mediaType,
       mediaMetadata: this.mediaMetadata?.toJSON() || null,
@@ -64,6 +67,7 @@ class PlaybackSession {
       playMethod: this.playMethod,
       mediaPlayer: this.mediaPlayer,
       deviceInfo: this.deviceInfo?.toJSON() || null,
+      serverVersion: this.serverVersion,
       date: this.date,
       dayOfWeek: this.dayOfWeek,
       timeListening: this.timeListening,
@@ -74,12 +78,18 @@ class PlaybackSession {
     }
   }
 
+  /**
+   * Session data to send to clients
+   * @param {[oldLibraryItem]} libraryItem optional
+   * @returns {object}
+   */
   toJSONForClient(libraryItem) {
     return {
       id: this.id,
       userId: this.userId,
       libraryId: this.libraryId,
       libraryItemId: this.libraryItemId,
+      bookId: this.bookId,
       episodeId: this.episodeId,
       mediaType: this.mediaType,
       mediaMetadata: this.mediaMetadata?.toJSON() || null,
@@ -91,6 +101,7 @@ class PlaybackSession {
       playMethod: this.playMethod,
       mediaPlayer: this.mediaPlayer,
       deviceInfo: this.deviceInfo?.toJSON() || null,
+      serverVersion: this.serverVersion,
       date: this.date,
       dayOfWeek: this.dayOfWeek,
       timeListening: this.timeListening,
@@ -99,8 +110,8 @@ class PlaybackSession {
       startedAt: this.startedAt,
       updatedAt: this.updatedAt,
       audioTracks: this.audioTracks.map(at => at.toJSON()),
-      videoTrack: this.videoTrack ? this.videoTrack.toJSON() : null,
-      libraryItem: libraryItem.toJSONExpanded()
+      videoTrack: this.videoTrack?.toJSON() || null,
+      libraryItem: libraryItem?.toJSONExpanded() || null
     }
   }
 
@@ -109,12 +120,31 @@ class PlaybackSession {
     this.userId = session.userId
     this.libraryId = session.libraryId || null
     this.libraryItemId = session.libraryItemId
+    this.bookId = session.bookId || null
     this.episodeId = session.episodeId
     this.mediaType = session.mediaType
     this.duration = session.duration
     this.playMethod = session.playMethod
     this.mediaPlayer = session.mediaPlayer || null
-    this.deviceInfo = new DeviceInfo(session.deviceInfo)
+
+    // Temp do not store old IDs
+    if (this.libraryId?.startsWith('lib_')) {
+      this.libraryId = null
+    }
+    if (this.libraryItemId?.startsWith('li_') || this.libraryItemId?.startsWith('local_')) {
+      this.libraryItemId = null
+    }
+    if (this.episodeId?.startsWith('ep_') || this.episodeId?.startsWith('local_')) {
+      this.episodeId = null
+    }
+
+    if (session.deviceInfo instanceof DeviceInfo) {
+      this.deviceInfo = new DeviceInfo(session.deviceInfo.toJSON())
+    } else {
+      this.deviceInfo = new DeviceInfo(session.deviceInfo)
+    }
+
+    this.serverVersion = session.serverVersion
     this.chapters = session.chapters || []
 
     this.mediaMetadata = null
@@ -152,7 +182,7 @@ class PlaybackSession {
   }
 
   get deviceId() {
-    return this.deviceInfo?.deviceId
+    return this.deviceInfo?.id
   }
 
   get deviceDescription() {
@@ -170,14 +200,15 @@ class PlaybackSession {
   }
 
   setData(libraryItem, user, mediaPlayer, deviceInfo, startTime, episodeId = null) {
-    this.id = getId('play')
+    this.id = uuidv4()
     this.userId = user.id
     this.libraryId = libraryItem.libraryId
     this.libraryItemId = libraryItem.id
+    this.bookId = episodeId ? null : libraryItem.media.id
     this.episodeId = episodeId
     this.mediaType = libraryItem.mediaType
     this.mediaMetadata = libraryItem.media.metadata.clone()
-    this.chapters = (libraryItem.media.chapters || []).map(c => ({ ...c })) // Only book mediaType has chapters
+    this.chapters = libraryItem.media.getChapters(episodeId)
     this.displayTitle = libraryItem.media.getPlaybackTitle(episodeId)
     this.displayAuthor = libraryItem.media.getPlaybackAuthor()
     this.coverPath = libraryItem.media.coverPath
@@ -190,6 +221,7 @@ class PlaybackSession {
 
     this.mediaPlayer = mediaPlayer
     this.deviceInfo = deviceInfo || new DeviceInfo()
+    this.serverVersion = serverVersion
 
     this.timeListening = 0
     this.startTime = startTime

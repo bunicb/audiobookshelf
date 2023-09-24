@@ -1,42 +1,43 @@
 const Path = require('path')
+const uuidv4 = require("uuid").v4
 const fs = require('../libs/fsExtra')
 const date = require('../libs/dateAndTime')
 
 const Logger = require('../Logger')
-const Folder = require('../objects/Folder')
+const Library = require('../objects/Library')
 const { LogLevel } = require('../utils/constants')
-const filePerms = require('../utils/filePerms')
-const { getId, secondsToTimestamp } = require('../utils/index')
+const { secondsToTimestamp } = require('../utils/index')
 
 class LibraryScan {
   constructor() {
     this.id = null
     this.type = null
-    this.libraryId = null
-    this.libraryName = null
-    this.libraryMediaType = null
-    this.folders = null
+    /** @type {import('../objects/Library')} */
+    this.library = null
     this.verbose = false
-
-    this.scanOptions = null
 
     this.startedAt = null
     this.finishedAt = null
     this.elapsed = null
+    this.error = null
 
     this.resultsMissing = 0
     this.resultsAdded = 0
     this.resultsUpdated = 0
 
+    /** @type {string[]} */
+    this.authorsRemovedFromBooks = []
+    /** @type {string[]} */
+    this.seriesRemovedFromBooks = []
+
     this.logs = []
   }
 
-  get _scanOptions() { return this.scanOptions || {} }
-  get forceRescan() { return !!this._scanOptions.forceRescan }
-  get preferAudioMetadata() { return !!this._scanOptions.preferAudioMetadata }
-  get preferOpfMetadata() { return !!this._scanOptions.preferOpfMetadata }
-  get preferOverdriveMediaMarker() { return !!this._scanOptions.preferOverdriveMediaMarker }
-  get findCovers() { return !!this._scanOptions.findCovers }
+  get libraryId() { return this.library.id }
+  get libraryName() { return this.library.name }
+  get libraryMediaType() { return this.library.mediaType }
+  get folders() { return this.library.folders }
+
   get timestamp() {
     return (new Date()).toISOString()
   }
@@ -52,6 +53,7 @@ class LibraryScan {
       id: this.libraryId,
       type: this.type,
       name: this.libraryName,
+      error: this.error,
       results: {
         added: this.resultsAdded,
         updated: this.resultsUpdated,
@@ -70,36 +72,33 @@ class LibraryScan {
     return {
       id: this.id,
       type: this.type,
-      libraryId: this.libraryId,
-      libraryName: this.libraryName,
-      libraryMediaType: this.libraryMediaType,
-      folders: this.folders.map(f => f.toJSON()),
-      scanOptions: this.scanOptions ? this.scanOptions.toJSON() : null,
+      library: this.library.toJSON(),
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
       elapsed: this.elapsed,
+      error: this.error,
       resultsAdded: this.resultsAdded,
       resultsUpdated: this.resultsUpdated,
       resultsMissing: this.resultsMissing
     }
   }
 
-  setData(library, scanOptions, type = 'scan') {
-    this.id = getId('lscan')
+  setData(library, type = 'scan') {
+    this.id = uuidv4()
     this.type = type
-    this.libraryId = library.id
-    this.libraryName = library.name
-    this.libraryMediaType = library.mediaType
-    this.folders = library.folders.map(folder => new Folder(folder.toJSON()))
-
-    this.scanOptions = scanOptions
+    this.library = new Library(library.toJSON()) // clone library
 
     this.startedAt = Date.now()
   }
 
-  setComplete() {
+  /**
+   * 
+   * @param {string} error 
+   */
+  setComplete(error = null) {
     this.finishedAt = Date.now()
     this.elapsed = this.finishedAt - this.startedAt
+    this.error = error
   }
 
   getLogLevelString(level) {
@@ -120,7 +119,7 @@ class LibraryScan {
     }
 
     if (this.verbose) {
-      Logger.debug(`[LibraryScan] "${this.libraryName}":`, args)
+      Logger.debug(`[LibraryScan] "${this.libraryName}":`, ...args)
     }
     this.logs.push(logObj)
   }
@@ -135,7 +134,6 @@ class LibraryScan {
       logLines.push(JSON.stringify(l))
     })
     await fs.writeFile(outputPath, logLines.join('\n') + '\n')
-    await filePerms.setDefault(outputPath)
 
     Logger.info(`[LibraryScan] Scan log saved "${outputPath}"`)
   }

@@ -91,9 +91,19 @@ export default {
           path: '/config/notifications'
         },
         {
+          id: 'config-email',
+          title: this.$strings.HeaderEmail,
+          path: '/config/email'
+        },
+        {
           id: 'config-item-metadata-utils',
           title: this.$strings.HeaderItemMetadataUtils,
           path: '/config/item-metadata-utils'
+        },
+        {
+          id: 'config-rss-feeds',
+          title: this.$strings.HeaderRSSFeeds,
+          path: '/config/rss-feeds'
         }
       ]
 

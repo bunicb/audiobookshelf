@@ -76,6 +76,10 @@
       <div ref="moreIcon" v-show="!isSelectionMode && moreMenuItems.length" class="hidden md:block absolute cursor-pointer hover:text-yellow-300 300 hover:scale-125 transform duration-150" :style="{ bottom: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem' }" @click.stop.prevent="clickShowMore">
         <span class="material-icons" :style="{ fontSize: 1.2 * sizeMultiplier + 'rem' }">more_vert</span>
       </div>
+
+      <div v-if="ebookFormat" class="absolute" :style="{ bottom: 0.375 * sizeMultiplier + 'rem', left: 0.375 * sizeMultiplier + 'rem' }">
+        <span class="text-white/80" :style="{ fontSize: 0.8 * sizeMultiplier + 'rem' }">{{ ebookFormat }}</span>
+      </div>
     </div>
 
     <!-- Processing/loading spinner overlay -->
@@ -85,7 +89,7 @@
 
     <!-- Series name overlay -->
     <div v-if="booksInSeries && libraryItem && isHovering" class="w-full h-full absolute top-0 left-0 z-10 bg-black bg-opacity-60 rounded flex items-center justify-center" :style="{ padding: sizeMultiplier + 'rem' }">
-      <p class="text-gray-200 text-center" :style="{ fontSize: 1.1 * sizeMultiplier + 'rem' }">{{ series }}</p>
+      <p v-if="seriesName" class="text-gray-200 text-center" :style="{ fontSize: 1.1 * sizeMultiplier + 'rem' }">{{ seriesName }}</p>
     </div>
 
     <!-- Error widget -->
@@ -112,8 +116,13 @@
     </div>
 
     <!-- Podcast Num Episodes -->
-    <div v-else-if="numEpisodes && !isHovering && !isSelectionMode" class="absolute rounded-full bg-black bg-opacity-90 box-shadow-md z-10 flex items-center justify-center" :style="{ top: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem', width: 1.25 * sizeMultiplier + 'rem', height: 1.25 * sizeMultiplier + 'rem' }">
+    <div v-else-if="!numEpisodesIncomplete && numEpisodes && !isHovering && !isSelectionMode" class="absolute rounded-full bg-black bg-opacity-90 box-shadow-md z-10 flex items-center justify-center" :style="{ top: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem', width: 1.25 * sizeMultiplier + 'rem', height: 1.25 * sizeMultiplier + 'rem' }">
       <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }">{{ numEpisodes }}</p>
+    </div>
+
+    <!-- Podcast Num Episodes -->
+    <div v-else-if="numEpisodesIncomplete && !isHovering && !isSelectionMode" class="absolute rounded-full bg-yellow-400 text-black font-semibold box-shadow-md z-10 flex items-center justify-center" :style="{ top: 0.375 * sizeMultiplier + 'rem', right: 0.375 * sizeMultiplier + 'rem', width: 1.25 * sizeMultiplier + 'rem', height: 1.25 * sizeMultiplier + 'rem' }">
+      <p :style="{ fontSize: sizeMultiplier * 0.8 + 'rem' }">{{ numEpisodesIncomplete }}</p>
     </div>
   </div>
 </template>
@@ -170,12 +179,6 @@ export default {
     dateFormat() {
       return this.store.state.serverSettings.dateFormat
     },
-    showExperimentalFeatures() {
-      return this.store.state.showExperimentalFeatures
-    },
-    enableEReader() {
-      return this.store.getters['getServerSetting']('enableEReader')
-    },
     _libraryItem() {
       return this.libraryItem || {}
     },
@@ -215,13 +218,16 @@ export default {
       // Only included when filtering by series or collapse series or Continue Series shelf on home page
       return this.mediaMetadata.series
     },
+    seriesName() {
+      return this.series?.name || null
+    },
     seriesSequence() {
-      return this.series ? this.series.sequence : null
+      return this.series?.sequence || null
     },
     libraryId() {
       return this._libraryItem.libraryId
     },
-    hasEbook() {
+    ebookFormat() {
       return this.media.ebookFormat
     },
     numTracks() {
@@ -229,8 +235,10 @@ export default {
       return this.media.numTracks || 0 // toJSONMinified
     },
     numEpisodes() {
-      if (!this.isPodcast) return 0
       return this.media.numEpisodes || 0
+    },
+    numEpisodesIncomplete() {
+      return this._libraryItem.numEpisodesIncomplete || 0
     },
     processingBatch() {
       return this.store.state.processingBatch
@@ -252,14 +260,14 @@ export default {
     },
     booksInSeries() {
       // Only added to item object when collapseSeries is enabled
-      return this.collapsedSeries ? this.collapsedSeries.numBooks : 0
+      return this.collapsedSeries?.numBooks || 0
     },
     seriesSequenceList() {
-      return this.collapsedSeries ? this.collapsedSeries.seriesSequenceList : null
+      return this.collapsedSeries?.seriesSequenceList || null
     },
     libraryItemIdsInSeries() {
       // Only added to item object when collapseSeries is enabled
-      return this.collapsedSeries ? this.collapsedSeries.libraryItemIds || [] : []
+      return this.collapsedSeries?.libraryItemIds || []
     },
     hasCover() {
       return !!this.media.coverPath
@@ -313,6 +321,7 @@ export default {
       if (this.orderBy === 'media.duration') return 'Duration: ' + this.$elapsedPrettyExtended(this.media.duration, false)
       if (this.orderBy === 'size') return 'Size: ' + this.$bytesPretty(this._libraryItem.size)
       if (this.orderBy === 'media.numTracks') return `${this.numEpisodes} Episodes`
+      if (this.orderBy === 'media.metadata.publishedYear' && this.mediaMetadata.publishedYear) return 'Published ' + this.mediaMetadata.publishedYear
       return null
     },
     episodeProgress() {
@@ -324,6 +333,9 @@ export default {
       if (this.isMusic) return null
       if (this.episodeProgress) return this.episodeProgress
       return this.store.getters['user/getUserMediaProgress'](this.libraryItemId)
+    },
+    isEBookOnly() {
+      return !this.numTracks && this.ebookFormat
     },
     useEBookProgress() {
       if (!this.userProgress || this.userProgress.progress) return false
@@ -360,13 +372,13 @@ export default {
       return this.store.getters['getIsStreamingFromDifferentLibrary']
     },
     showReadButton() {
-      return !this.isSelectionMode && !this.showPlayButton && this.hasEbook && (this.showExperimentalFeatures || this.enableEReader)
+      return !this.isSelectionMode && !this.showPlayButton && this.ebookFormat
     },
     showPlayButton() {
       return !this.isSelectionMode && !this.isMissing && !this.isInvalid && !this.isStreaming && (this.numTracks || this.recentEpisode || this.isMusic)
     },
     showSmallEBookIcon() {
-      return !this.isSelectionMode && this.hasEbook && (this.showExperimentalFeatures || this.enableEReader)
+      return !this.isSelectionMode && this.ebookFormat
     },
     isMissing() {
       return this._libraryItem.isMissing
@@ -482,6 +494,18 @@ export default {
             text: this.$strings.LabelAddToPlaylist
           })
         }
+        if (this.ebookFormat && this.store.state.libraries.ereaderDevices?.length) {
+          items.push({
+            text: this.$strings.LabelSendEbookToDevice,
+            subitems: this.store.state.libraries.ereaderDevices.map((d) => {
+              return {
+                text: d.name,
+                func: 'sendToDevice',
+                data: d.name
+              }
+            })
+          })
+        }
       }
       if (this.userCanUpdate) {
         items.push({
@@ -508,7 +532,7 @@ export default {
       if (this.continueListeningShelf) {
         items.push({
           func: 'removeFromContinueListening',
-          text: this.$strings.ButtonRemoveFromContinueListening
+          text: this.isEBookOnly ? this.$strings.ButtonRemoveFromContinueReading : this.$strings.ButtonRemoveFromContinueListening
         })
       }
       if (!this.isPodcast) {
@@ -667,7 +691,6 @@ export default {
         .$patch(apiEndpoint, updatePayload)
         .then(() => {
           this.processing = false
-          toast.success(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedSuccess : this.$strings.ToastItemMarkedAsNotFinishedSuccess)
         })
         .catch((error) => {
           console.error('Failed', error)
@@ -712,7 +735,40 @@ export default {
       // More menu func
       this.store.commit('showEditModalOnTab', { libraryItem: this.libraryItem, tab: 'match' })
     },
+    sendToDevice(deviceName) {
+      // More menu func
+      const payload = {
+        // message: `Are you sure you want to send ${this.ebookFormat} ebook "${this.title}" to device "${deviceName}"?`,
+        message: this.$getString('MessageConfirmSendEbookToDevice', [this.ebookFormat, this.title, deviceName]),
+        callback: (confirmed) => {
+          if (confirmed) {
+            const payload = {
+              libraryItemId: this.libraryItemId,
+              deviceName
+            }
+            this.processing = true
+            const axios = this.$axios || this.$nuxt.$axios
+            axios
+              .$post(`/api/emails/send-ebook-to-device`, payload)
+              .then(() => {
+                this.$toast.success(this.$getString('ToastSendEbookToDeviceSuccess', [deviceName]))
+              })
+              .catch((error) => {
+                console.error('Failed to send ebook to device', error)
+                this.$toast.error(this.$strings.ToastSendEbookToDeviceFailed)
+              })
+              .finally(() => {
+                this.processing = false
+              })
+          }
+        },
+        type: 'yesNo'
+      }
+      this.store.commit('globals/setConfirmPrompt', payload)
+    },
     removeSeriesFromContinueListening() {
+      if (!this.series) return
+
       const axios = this.$axios || this.$nuxt.$axios
       this.processing = true
       axios
@@ -825,8 +881,8 @@ export default {
           items: this.moreMenuItems
         },
         created() {
-          this.$on('action', (func) => {
-            if (_this[func]) _this[func]()
+          this.$on('action', (action) => {
+            if (action.func && _this[action.func]) _this[action.func](action.data)
           })
           this.$on('close', () => {
             _this.isMoreMenuOpen = false
@@ -838,7 +894,7 @@ export default {
       var wrapperBox = this.$refs.moreIcon.getBoundingClientRect()
       var el = instance.$el
 
-      var elHeight = this.moreMenuItems.length * 28 + 2
+      var elHeight = this.moreMenuItems.length * 28 + 10
       var elWidth = 130
 
       var bottomOfIcon = wrapperBox.top + wrapperBox.height
@@ -865,12 +921,13 @@ export default {
       this.createMoreMenu()
     },
     async clickReadEBook() {
-      var libraryItem = await this.$axios.$get(`/api/items/${this.libraryItemId}?expanded=1`).catch((error) => {
+      const axios = this.$axios || this.$nuxt.$axios
+      var libraryItem = await axios.$get(`/api/items/${this.libraryItemId}?expanded=1`).catch((error) => {
         console.error('Failed to get lirbary item', this.libraryItemId)
         return null
       })
       if (!libraryItem) return
-      this.store.commit('showEReader', libraryItem)
+      this.store.commit('showEReader', { libraryItem, keepProgress: true })
     },
     selectBtnClick(evt) {
       if (this.processingBatch) return

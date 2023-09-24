@@ -1,10 +1,11 @@
+const Sequelize = require('sequelize')
 const cron = require('../libs/nodeCron')
 const Logger = require('../Logger')
+const Database = require('../Database')
+const LibraryScanner = require('../scanner/LibraryScanner')
 
 class CronManager {
-  constructor(db, scanner, podcastManager) {
-    this.db = db
-    this.scanner = scanner
+  constructor(podcastManager) {
     this.podcastManager = podcastManager
 
     this.libraryScanCrons = []
@@ -13,13 +14,21 @@ class CronManager {
     this.podcastCronExpressionsExecuting = []
   }
 
-  init() {
-    this.initLibraryScanCrons()
-    this.initPodcastCrons()
+  /**
+   * Initialize library scan crons & podcast download crons
+   * @param {oldLibrary[]} libraries 
+   */
+  async init(libraries) {
+    this.initLibraryScanCrons(libraries)
+    await this.initPodcastCrons()
   }
 
-  initLibraryScanCrons() {
-    for (const library of this.db.libraries) {
+  /**
+   * Initialize library scan crons
+   * @param {oldLibrary[]} libraries 
+   */
+  initLibraryScanCrons(libraries) {
+    for (const library of libraries) {
       if (library.settings.autoScanCronExpression) {
         this.startCronForLibrary(library)
       }
@@ -30,7 +39,7 @@ class CronManager {
     Logger.debug(`[CronManager] Init library scan cron for ${library.name} on schedule ${library.settings.autoScanCronExpression}`)
     const libScanCron = cron.schedule(library.settings.autoScanCronExpression, () => {
       Logger.debug(`[CronManager] Library scan cron executing for ${library.name}`)
-      this.scanner.scan(library)
+      LibraryScanner.scan(library)
     })
     this.libraryScanCrons.push({
       libraryId: library.id,
@@ -62,23 +71,34 @@ class CronManager {
     }
   }
 
-  initPodcastCrons() {
+  /**
+   * Init cron jobs for auto-download podcasts
+   */
+  async initPodcastCrons() {
     const cronExpressionMap = {}
-    this.db.libraryItems.forEach((li) => {
-      if (li.mediaType === 'podcast' && li.media.autoDownloadEpisodes) {
-        if (!li.media.autoDownloadSchedule) {
-          Logger.error(`[CronManager] Podcast auto download schedule is not set for ${li.media.metadata.title}`)
-        } else {
-          if (!cronExpressionMap[li.media.autoDownloadSchedule]) {
-            cronExpressionMap[li.media.autoDownloadSchedule] = {
-              expression: li.media.autoDownloadSchedule,
-              libraryItemIds: []
-            }
-          }
-          cronExpressionMap[li.media.autoDownloadSchedule].libraryItemIds.push(li.id)
+
+    const podcastsWithAutoDownload = await Database.podcastModel.findAll({
+      where: {
+        autoDownloadEpisodes: true,
+        autoDownloadSchedule: {
+          [Sequelize.Op.not]: null
         }
+      },
+      include: {
+        model: Database.libraryItemModel
       }
     })
+
+    for (const podcast of podcastsWithAutoDownload) {
+      if (!cronExpressionMap[podcast.autoDownloadSchedule]) {
+        cronExpressionMap[podcast.autoDownloadSchedule] = {
+          expression: podcast.autoDownloadSchedule,
+          libraryItemIds: []
+        }
+      }
+      cronExpressionMap[podcast.autoDownloadSchedule].libraryItemIds.push(podcast.libraryItem.id)
+    }
+
     if (!Object.keys(cronExpressionMap).length) return
 
     Logger.debug(`[CronManager] Found ${Object.keys(cronExpressionMap).length} podcast episode schedules to start`)
@@ -119,7 +139,7 @@ class CronManager {
     // Get podcast library items to check
     const libraryItems = []
     for (const libraryItemId of libraryItemIds) {
-      const libraryItem = this.db.libraryItems.find(li => li.id === libraryItemId)
+      const libraryItem = await Database.libraryItemModel.getOldById(libraryItemId)
       if (!libraryItem) {
         Logger.error(`[CronManager] Library item ${libraryItemId} not found for episode check cron ${expression}`)
         podcastCron.libraryItemIds = podcastCron.libraryItemIds.filter(lid => lid !== libraryItemId) // Filter it out

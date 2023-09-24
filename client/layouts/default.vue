@@ -35,7 +35,9 @@ export default {
       isSocketConnected: false,
       isFirstSocketConnection: true,
       socketConnectionToastId: null,
-      currentLang: null
+      currentLang: null,
+      multiSessionOtherSessionId: null, // Used for multiple sessions open warning toast
+      multiSessionCurrentSessionId: null // Used for multiple sessions open warning toast
     }
   },
   watch: {
@@ -229,8 +231,12 @@ export default {
     scanComplete(data) {
       console.log('Scan complete received', data)
 
-      var message = `${data.type === 'match' ? 'Match' : 'Scan'} "${data.name}" complete!`
-      if (data.results) {
+      let message = `${data.type === 'match' ? 'Match' : 'Scan'} "${data.name}" complete!`
+      let toastType = 'success'
+      if (data.error) {
+        message = `${data.type === 'match' ? 'Match' : 'Scan'} "${data.name}" finished with error:\n${data.error}`
+        toastType = 'error'
+      } else if (data.results) {
         var scanResultMsgs = []
         var results = data.results
         if (results.added) scanResultMsgs.push(`${results.added} added`)
@@ -245,9 +251,9 @@ export default {
 
       var existingScan = this.$store.getters['scanners/getLibraryScan'](data.id)
       if (existingScan && !isNaN(existingScan.toastId)) {
-        this.$toast.update(existingScan.toastId, { content: message, options: { timeout: 5000, type: 'success', closeButton: false, onClose: () => null } }, true)
+        this.$toast.update(existingScan.toastId, { content: message, options: { timeout: 5000, type: toastType, closeButton: false, onClose: () => null } }, true)
       } else {
-        this.$toast.success(message, { timeout: 5000 })
+        this.$toast[toastType](message, { timeout: 5000 })
       }
 
       this.$store.commit('scanners/remove', data)
@@ -300,14 +306,27 @@ export default {
       this.$store.commit('users/updateUserOnline', user)
     },
     userSessionClosed(sessionId) {
+      // If this session or other session is closed then dismiss multiple sessions warning toast
+      if (sessionId === this.multiSessionOtherSessionId || this.multiSessionCurrentSessionId === sessionId) {
+        this.multiSessionOtherSessionId = null
+        this.multiSessionCurrentSessionId = null
+        this.$toast.dismiss('multiple-sessions')
+      }
       if (this.$refs.streamContainer) this.$refs.streamContainer.sessionClosedEvent(sessionId)
     },
     userMediaProgressUpdate(payload) {
       this.$store.commit('user/updateMediaProgress', payload)
 
       if (payload.data) {
-        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId)) {
-          // TODO: Update currently open session if being played from another device
+        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId) && this.$store.state.playbackSessionId !== payload.sessionId) {
+          this.multiSessionOtherSessionId = payload.sessionId
+          this.multiSessionCurrentSessionId = this.$store.state.playbackSessionId
+          console.log(`Media progress was updated from another session (${this.multiSessionOtherSessionId}) for currently open media. Device description=${payload.deviceDescription}. Current session id=${this.multiSessionCurrentSessionId}`)
+          if (this.$store.state.streamIsPlaying) {
+            this.$toast.update('multiple-sessions', { content: `Another session is open for this item on device ${payload.deviceDescription}`, options: { timeout: 20000, type: 'warning', pauseOnFocusLoss: false } }, true)
+          } else {
+            this.$eventBus.$emit('playback-time-update', payload.data.currentTime)
+          }
         }
       }
     },
@@ -327,6 +346,10 @@ export default {
         }
       }
       this.$store.commit('libraries/removeCollection', collection)
+    },
+    seriesRemoved({ id, libraryId }) {
+      if (this.currentLibraryId !== libraryId) return
+      this.$store.commit('libraries/removeSeriesFromFilterData', id)
     },
     playlistAdded(playlist) {
       if (playlist.userId !== this.user.id || this.currentLibraryId !== playlist.libraryId) return
@@ -364,6 +387,11 @@ export default {
     },
     adminMessageEvt(message) {
       this.$toast.info(message)
+    },
+    ereaderDevicesUpdated(data) {
+      if (!data?.ereaderDevices) return
+
+      this.$store.commit('libraries/setEReaderDevices', data.ereaderDevices)
     },
     initializeSocket() {
       this.socket = this.$nuxtSocket({
@@ -422,6 +450,9 @@ export default {
       this.socket.on('collection_updated', this.collectionUpdated)
       this.socket.on('collection_removed', this.collectionRemoved)
 
+      // Series Listeners
+      this.socket.on('series_removed', this.seriesRemoved)
+
       // User Playlist Listeners
       this.socket.on('playlist_added', this.playlistAdded)
       this.socket.on('playlist_updated', this.playlistUpdated)
@@ -436,6 +467,9 @@ export default {
       this.socket.on('task_started', this.taskStarted)
       this.socket.on('task_finished', this.taskFinished)
       this.socket.on('metadata_embed_queue_update', this.metadataEmbedQueueUpdate)
+
+      // EReader Device Listeners
+      this.socket.on('ereader-devices-updated', this.ereaderDevicesUpdated)
 
       this.socket.on('backup_applied', this.backupApplied)
 
@@ -468,9 +502,9 @@ export default {
       }
     },
     checkActiveElementIsInput() {
-      var activeElement = document.activeElement
-      var inputs = ['input', 'select', 'button', 'textarea']
-      return activeElement && inputs.indexOf(activeElement.tagName.toLowerCase()) !== -1
+      const activeElement = document.activeElement
+      const inputs = ['input', 'select', 'button', 'textarea', 'trix-editor']
+      return activeElement && inputs.some((i) => i === activeElement.tagName.toLowerCase())
     },
     getHotkeyName(e) {
       var keyCode = e.keyCode || e.which
@@ -537,12 +571,6 @@ export default {
         .catch((err) => console.error(err))
     },
     initLocalStorage() {
-      // If experimental features set in local storage
-      var experimentalFeaturesSaved = localStorage.getItem('experimental')
-      if (experimentalFeaturesSaved === '1') {
-        this.$store.commit('setExperimentalFeatures', true)
-      }
-
       // Queue auto play
       var playerQueueAutoPlay = localStorage.getItem('playerQueueAutoPlay')
       this.$store.commit('setPlayerQueueAutoPlay', playerQueueAutoPlay !== '0')

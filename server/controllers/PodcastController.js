@@ -1,11 +1,14 @@
 const Logger = require('../Logger')
 const SocketAuthority = require('../SocketAuthority')
+const Database = require('../Database')
 
 const fs = require('../libs/fsExtra')
 
 const { getPodcastFeed, findMatchingEpisodes } = require('../utils/podcastUtils')
 const { getFileTimestampsWithIno, filePathToPOSIX } = require('../utils/fileUtils')
-const filePerms = require('../utils/filePerms')
+
+const Scanner = require('../scanner/Scanner')
+const CoverManager = require('../managers/CoverManager')
 
 const LibraryItem = require('../objects/LibraryItem')
 
@@ -18,7 +21,7 @@ class PodcastController {
     }
     const payload = req.body
 
-    const library = this.db.libraries.find(lib => lib.id === payload.libraryId)
+    const library = await Database.libraryModel.getOldById(payload.libraryId)
     if (!library) {
       Logger.error(`[PodcastController] Create: Library not found "${payload.libraryId}"`)
       return res.status(404).send('Library not found')
@@ -33,9 +36,13 @@ class PodcastController {
     const podcastPath = filePathToPOSIX(payload.path)
 
     // Check if a library item with this podcast folder exists already
-    const existingLibraryItem = this.db.libraryItems.find(li => li.path === podcastPath && li.libraryId === library.id)
+    const existingLibraryItem = (await Database.libraryItemModel.count({
+      where: {
+        path: podcastPath
+      }
+    })) > 0
     if (existingLibraryItem) {
-      Logger.error(`[PodcastController] Podcast already exists with name "${existingLibraryItem.media.metadata.title}" at path "${podcastPath}"`)
+      Logger.error(`[PodcastController] Podcast already exists at path "${podcastPath}"`)
       return res.status(400).send('Podcast already exists')
     }
 
@@ -44,7 +51,6 @@ class PodcastController {
       return false
     })
     if (!success) return res.status(400).send('Invalid podcast path')
-    await filePerms.setDefault(podcastPath)
 
     const libraryItemFolderStats = await getFileTimestampsWithIno(podcastPath)
 
@@ -70,7 +76,7 @@ class PodcastController {
     if (payload.media.metadata.imageUrl) {
       // TODO: Scan cover image to library files
       // Podcast cover will always go into library item folder
-      const coverResponse = await this.coverManager.downloadCoverFromUrl(libraryItem, payload.media.metadata.imageUrl, true)
+      const coverResponse = await CoverManager.downloadCoverFromUrl(libraryItem, payload.media.metadata.imageUrl, true)
       if (coverResponse) {
         if (coverResponse.error) {
           Logger.error(`[PodcastController] Download cover error from "${payload.media.metadata.imageUrl}": ${coverResponse.error}`)
@@ -80,7 +86,7 @@ class PodcastController {
       }
     }
 
-    await this.db.insertLibraryItem(libraryItem)
+    await Database.createLibraryItem(libraryItem)
     SocketAuthority.emitter('item_added', libraryItem.toJSONExpanded())
 
     res.json(libraryItem.toJSONExpanded())
@@ -109,7 +115,7 @@ class PodcastController {
     res.json({ podcast })
   }
 
-  async getOPMLFeeds(req, res) {
+  async getFeedsFromOPMLText(req, res) {
     if (!req.body.opmlText) {
       return res.sendStatus(400)
     }
@@ -197,9 +203,9 @@ class PodcastController {
     }
 
     const overrideDetails = req.query.override === '1'
-    const episodesUpdated = await this.scanner.quickMatchPodcastEpisodes(req.libraryItem, { overrideDetails })
+    const episodesUpdated = await Scanner.quickMatchPodcastEpisodes(req.libraryItem, { overrideDetails })
     if (episodesUpdated) {
-      await this.db.updateLibraryItem(req.libraryItem)
+      await Database.updateLibraryItem(req.libraryItem)
       SocketAuthority.emitter('item_updated', req.libraryItem.toJSONExpanded())
     }
 
@@ -216,9 +222,8 @@ class PodcastController {
       return res.status(404).send('Episode not found')
     }
 
-    var wasUpdated = libraryItem.media.updateEpisode(episodeId, req.body)
-    if (wasUpdated) {
-      await this.db.updateLibraryItem(libraryItem)
+    if (libraryItem.media.updateEpisode(episodeId, req.body)) {
+      await Database.updateLibraryItem(libraryItem)
       SocketAuthority.emitter('item_updated', libraryItem.toJSONExpanded())
     }
 
@@ -241,18 +246,18 @@ class PodcastController {
 
   // DELETE: api/podcasts/:id/episode/:episodeId
   async removeEpisode(req, res) {
-    var episodeId = req.params.episodeId
-    var libraryItem = req.libraryItem
-    var hardDelete = req.query.hard === '1'
+    const episodeId = req.params.episodeId
+    const libraryItem = req.libraryItem
+    const hardDelete = req.query.hard === '1'
 
-    var episode = libraryItem.media.episodes.find(ep => ep.id === episodeId)
+    const episode = libraryItem.media.episodes.find(ep => ep.id === episodeId)
     if (!episode) {
       Logger.error(`[PodcastController] removeEpisode episode ${episodeId} not found for item ${libraryItem.id}`)
       return res.sendStatus(404)
     }
 
     if (hardDelete) {
-      var audioFile = episode.audioFile
+      const audioFile = episode.audioFile
       // TODO: this will trigger the watcher. should maybe handle this gracefully
       await fs.remove(audioFile.metadata.path).then(() => {
         Logger.info(`[PodcastController] Hard deleted episode file at "${audioFile.metadata.path}"`)
@@ -263,18 +268,53 @@ class PodcastController {
 
     // Remove episode from Podcast and library file
     const episodeRemoved = libraryItem.media.removeEpisode(episodeId)
-    if (episodeRemoved && episodeRemoved.audioFile) {
+    if (episodeRemoved?.audioFile) {
       libraryItem.removeLibraryFile(episodeRemoved.audioFile.ino)
     }
 
-    await this.db.updateLibraryItem(libraryItem)
+    // Update/remove playlists that had this podcast episode
+    const playlistMediaItems = await Database.playlistMediaItemModel.findAll({
+      where: {
+        mediaItemId: episodeId
+      },
+      include: {
+        model: Database.playlistModel,
+        include: Database.playlistMediaItemModel
+      }
+    })
+    for (const pmi of playlistMediaItems) {
+      const numItems = pmi.playlist.playlistMediaItems.length - 1
+
+      if (!numItems) {
+        Logger.info(`[PodcastController] Playlist "${playlist.name}" has no more items - removing it`)
+        const jsonExpanded = await pmi.playlist.getOldJsonExpanded()
+        SocketAuthority.clientEmitter(pmi.playlist.userId, 'playlist_removed', jsonExpanded)
+        await pmi.playlist.destroy()
+      } else {
+        await pmi.destroy()
+        const jsonExpanded = await pmi.playlist.getOldJsonExpanded()
+        SocketAuthority.clientEmitter(pmi.playlist.userId, 'playlist_updated', jsonExpanded)
+      }
+    }
+
+    // Remove media progress for this episode
+    const mediaProgressRemoved = await Database.mediaProgressModel.destroy({
+      where: {
+        mediaItemId: episode.id
+      }
+    })
+    if (mediaProgressRemoved) {
+      Logger.info(`[PodcastController] Removed ${mediaProgressRemoved} media progress for episode ${episode.id}`)
+    }
+
+    await Database.updateLibraryItem(libraryItem)
     SocketAuthority.emitter('item_updated', libraryItem.toJSONExpanded())
     res.json(libraryItem.toJSON())
   }
 
-  middleware(req, res, next) {
-    const item = this.db.libraryItems.find(li => li.id === req.params.id)
-    if (!item || !item.media) return res.sendStatus(404)
+  async middleware(req, res, next) {
+    const item = await Database.libraryItemModel.getOldById(req.params.id)
+    if (!item?.media) return res.sendStatus(404)
 
     if (!item.isPodcast) {
       return res.sendStatus(500)
